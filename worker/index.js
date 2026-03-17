@@ -21,8 +21,9 @@ import { extractText as unpdfExtractText } from 'unpdf';
  */
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    env._ctx = ctx;
     const cors = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
@@ -103,6 +104,9 @@ async function route(url, request, env, cors) {
     const jobId = path.split('/api/matches/')[1];
     return handleGetMatchDetail(request, env, cors, jobId);
   }
+
+  // Job locations for autocomplete
+  if (path === '/api/jobs/locations' && method === 'GET') return handleGetJobLocations(env, cors);
 
   // Admin: seed jobs
   if (path === '/api/admin/seed-jobs' && method === 'POST') return handleSeedJobs(env, cors);
@@ -266,13 +270,22 @@ async function handleDocDelete(docId, request, env, cors) {
   const docIds = JSON.parse(docsJson).filter(id => id !== docId);
   await env.DATA.put(`user_docs:${userId}`, JSON.stringify(docIds));
 
-  // Rebuild profile with remaining docs
-  try {
-    await rebuildProfile(userId, env);
-  } catch (e) {
-    // If no docs left, clear profile
-    await env.DATA.delete(`profile:${userId}`);
-    await env.DATA.delete(`user_matches:${userId}`);
+  // Rebuild profile in background (don't block the response)
+  const ctx = env._ctx;
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil((async () => {
+      try {
+        if (docIds.length > 0) {
+          await rebuildProfile(userId, env);
+        } else {
+          await env.DATA.delete(`profile:${userId}`);
+          await env.DATA.delete(`user_matches:${userId}`);
+        }
+      } catch (e) {
+        await env.DATA.delete(`profile:${userId}`);
+        await env.DATA.delete(`user_matches:${userId}`);
+      }
+    })());
   }
 
   return Response.json({ ok: true }, { headers: cors });
@@ -336,7 +349,8 @@ async function handleUpdateSettings(request, env, cors) {
   const userId = await requireAuth(request, env);
   const body = await request.json();
   const settings = {
-    geography: body.geography || '',
+    locations: body.locations || [],
+    radius: body.radius || 50,
     salary_min: body.salary_min || 0,
     salary_max: body.salary_max || 0,
     industries: body.industries || []
@@ -345,12 +359,107 @@ async function handleUpdateSettings(request, env, cors) {
   return Response.json({ ok: true, settings }, { headers: cors });
 }
 
+// Major metro coords for radius matching
+const MAJOR_METROS = {
+  'Houston, TX': { lat: 29.7604, lng: -95.3698, state: 'TX' },
+  'Dallas, TX': { lat: 32.7767, lng: -96.7970, state: 'TX' },
+  'Austin, TX': { lat: 30.2672, lng: -97.7431, state: 'TX' },
+  'San Antonio, TX': { lat: 29.4241, lng: -98.4936, state: 'TX' },
+  'Fort Worth, TX': { lat: 32.7555, lng: -97.3308, state: 'TX' },
+  'Midland, TX': { lat: 31.9973, lng: -102.0779, state: 'TX' },
+  'Denver, CO': { lat: 39.7392, lng: -104.9903, state: 'CO' },
+  'New York, NY': { lat: 40.7128, lng: -74.0060, state: 'NY' },
+  'Chicago, IL': { lat: 41.8781, lng: -87.6298, state: 'IL' },
+  'Los Angeles, CA': { lat: 34.0522, lng: -118.2437, state: 'CA' },
+  'San Francisco, CA': { lat: 37.7749, lng: -122.4194, state: 'CA' },
+  'Atlanta, GA': { lat: 33.7490, lng: -84.3880, state: 'GA' },
+  'Boston, MA': { lat: 42.3601, lng: -71.0589, state: 'MA' },
+  'Washington, DC': { lat: 38.9072, lng: -77.0369, state: 'DC' },
+  'Seattle, WA': { lat: 47.6062, lng: -122.3321, state: 'WA' },
+  'Phoenix, AZ': { lat: 33.4484, lng: -112.0740, state: 'AZ' },
+  'Miami, FL': { lat: 25.7617, lng: -80.1918, state: 'FL' },
+  'Charlotte, NC': { lat: 35.2271, lng: -80.8431, state: 'NC' },
+  'Pittsburgh, PA': { lat: 40.4406, lng: -79.9959, state: 'PA' },
+  'Oklahoma City, OK': { lat: 35.4676, lng: -97.5164, state: 'OK' },
+  'Remote': { lat: 0, lng: 0, state: 'REMOTE' }
+};
+
+// Known city → metro mapping for Adzuna's weird location strings
+const CITY_COORDS = {
+  'houston': { lat: 29.76, lng: -95.37 },
+  'dallas': { lat: 32.78, lng: -96.80 },
+  'austin': { lat: 30.27, lng: -97.74 },
+  'san antonio': { lat: 29.42, lng: -98.49 },
+  'fort worth': { lat: 32.76, lng: -97.33 },
+  'midland': { lat: 32.00, lng: -102.08 },
+  'plano': { lat: 33.02, lng: -96.70 },
+  'irving': { lat: 32.81, lng: -96.95 },
+  'el paso': { lat: 31.76, lng: -106.44 },
+  'laredo': { lat: 27.51, lng: -99.51 },
+  'big spring': { lat: 32.25, lng: -101.48 },
+  'la porte': { lat: 29.67, lng: -95.02 },
+  'la marque': { lat: 29.37, lng: -94.97 },
+  'bee cave': { lat: 30.31, lng: -97.94 },
+};
+
+function haversineMiles(lat1, lng1, lat2, lng2) {
+  const R = 3959;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function getJobCoords(location) {
+  if (!location) return null;
+  const loc = location.toLowerCase();
+  // Check known cities
+  for (const [city, coords] of Object.entries(CITY_COORDS)) {
+    if (loc.includes(city)) return coords;
+  }
+  // Check metro names
+  for (const [metro, data] of Object.entries(MAJOR_METROS)) {
+    const metroCity = metro.split(',')[0].toLowerCase();
+    if (loc.includes(metroCity)) return { lat: data.lat, lng: data.lng };
+  }
+  return null;
+}
+
+function jobMatchesLocationFilter(job, locations, radius) {
+  if (!locations || !locations.length) return true;
+  const jobLoc = (job.location || '').toLowerCase();
+  
+  // Check "Remote"
+  if (locations.some(l => l === 'Remote') && (jobLoc.includes('remote') || jobLoc.includes('location open'))) return true;
+  
+  const jobCoords = getJobCoords(job.location);
+  
+  for (const loc of locations) {
+    const metro = MAJOR_METROS[loc];
+    if (metro) {
+      if (metro.state === 'REMOTE') continue;
+      if (jobCoords) {
+        const dist = haversineMiles(metro.lat, metro.lng, jobCoords.lat, jobCoords.lng);
+        if (dist <= radius) return true;
+      }
+      // Fallback: string match on state
+      if (jobLoc.includes(metro.state.toLowerCase()) || jobLoc.includes(loc.split(',')[0].toLowerCase())) return true;
+    }
+  }
+  return false;
+}
+
+async function handleGetJobLocations(env, cors) {
+  return Response.json({ ok: true, locations: Object.keys(MAJOR_METROS) }, { headers: cors });
+}
+
 // ── Matches ──────────────────────────────────────────────────────────────────
 
 async function handleGetMatches(request, env, cors) {
   const userId = await requireAuth(request, env);
   const matchesJson = await env.DATA.get(`user_matches:${userId}`) || '[]';
   const matchIds = JSON.parse(matchesJson);
+  const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || '{}');
   
   const matches = [];
   for (const id of matchIds) {
@@ -358,6 +467,16 @@ async function handleGetMatches(request, env, cors) {
     if (!m) continue;
     const job = JSON.parse(await env.DATA.get(`job:${m.job_id}`) || 'null');
     if (!job) continue;
+
+    // Apply salary filter
+    if (settings.salary_min && job.salary_max && job.salary_max < settings.salary_min) continue;
+    if (settings.salary_max && job.salary_min && job.salary_min > settings.salary_max) continue;
+
+    // Apply location filter with radius
+    if (settings.locations && settings.locations.length > 0) {
+      if (!jobMatchesLocationFilter(job, settings.locations, settings.radius || 50)) continue;
+    }
+
     matches.push({
       id: m.id,
       score: m.score,
@@ -372,21 +491,46 @@ async function handleGetMatches(request, env, cors) {
 
 async function handleGetMatchDetail(request, env, cors, jobId) {
   const userId = await requireAuth(request, env);
+  const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || 'null');
+  const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
+  if (!job || !profile) return Response.json({ ok: false, error: 'Match not found' }, { status: 404, headers: cors });
+
+  // Find the match
   const matchesJson = await env.DATA.get(`user_matches:${userId}`) || '[]';
   const matchIds = JSON.parse(matchesJson);
-  
+  let match = null;
   for (const id of matchIds) {
     const m = JSON.parse(await env.DATA.get(`match:${id}`) || 'null');
-    if (m && m.job_id === jobId) {
-      const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
-      return Response.json({
-        ok: true,
-        match: { id: m.id, score: m.score, breakdown: JSON.parse(m.breakdown || '{}'), created_at: m.created_at },
-        job
-      }, { headers: cors });
+    if (m && m.job_id === jobId) { match = m; break; }
+  }
+  if (!match) return Response.json({ ok: false, error: 'Match not found' }, { status: 404, headers: cors });
+
+  // Check if we already have a detailed breakdown cached
+  let breakdown = JSON.parse(match.breakdown || '{}');
+  if (!breakdown.detailed) {
+    // Generate detailed GPT analysis
+    try {
+      const analysis = await generateDetailedBreakdown(env, profile.structured_data, job);
+      breakdown = { ...breakdown, ...analysis, detailed: true };
+      // Compute weighted score from GPT dimensions
+      const weights = { skills_match: 0.30, experience_match: 0.30, industry_match: 0.20, education_match: 0.10, leadership_match: 0.10 };
+      let weightedScore = 0, totalWeight = 0;
+      for (const [key, weight] of Object.entries(weights)) {
+        if (breakdown[key] != null) { weightedScore += breakdown[key] * weight; totalWeight += weight; }
+      }
+      if (totalWeight > 0) match.score = Math.round(weightedScore / totalWeight);
+      match.breakdown = JSON.stringify(breakdown);
+      await env.DATA.put(`match:${match.id}`, JSON.stringify(match));
+    } catch (e) {
+      console.error('Detailed breakdown failed:', e.message);
     }
   }
-  return Response.json({ ok: false, error: 'Match not found' }, { status: 404, headers: cors });
+
+  return Response.json({
+    ok: true,
+    match: { id: match.id, score: match.score, breakdown, created_at: match.created_at },
+    job: { id: job.id, title: job.title, company: job.company, location: job.location, description: job.description, salary_min: job.salary_min, salary_max: job.salary_max, url: job.url, category: job.category }
+  }, { headers: cors });
 }
 
 async function computeMatches(userId, env, profile) {
@@ -425,17 +569,83 @@ async function computeMatches(userId, env, profile) {
 }
 
 function generateBreakdown(profile, job, score) {
-  const skills = profile?.skills || {};
+  // Quick deterministic breakdown for list view (not GPT — that's on-demand in detail)
+  const desc = (job.description || '').toLowerCase();
+  const skills = [...(profile?.skills?.technical || []), ...(profile?.skills?.soft || [])];
+  const matchedSkills = skills.filter(s => desc.includes(s.toLowerCase()));
+  const skillsPct = skills.length ? Math.round((matchedSkills.length / Math.min(skills.length, 10)) * 100) : score;
+
+  const profileIndustries = (profile?.industries || []).map(i => i.toLowerCase());
+  const jobCat = (job.category || job.title || '').toLowerCase();
+  const industryMatch = profileIndustries.some(i => desc.includes(i) || jobCat.includes(i));
+
+  const yoe = profile?.years_of_experience || 0;
+  const seniorTerms = ['senior', 'lead', 'principal', 'director', 'vp', 'manager'];
+  const jobSeniority = seniorTerms.some(t => (job.title || '').toLowerCase().includes(t));
+  const expPct = yoe >= 10 ? (jobSeniority ? 90 : 80) : yoe >= 5 ? (jobSeniority ? 65 : 80) : 55;
+
   return {
     overall: score,
-    skills_match: Math.min(100, score + Math.floor(Math.random() * 10) - 5),
-    experience_match: Math.min(100, score + Math.floor(Math.random() * 15) - 7),
-    industry_match: Math.min(100, score + Math.floor(Math.random() * 12) - 6),
-    education_match: Math.min(100, score + Math.floor(Math.random() * 8) - 4),
-    summary: `Based on your profile, you are a ${score}% fit for this ${job.title} role at ${job.company}.`,
-    strengths: ['Relevant technical skills', 'Industry experience', 'Education level meets requirements'],
-    gaps: score < 80 ? ['Some specialized skills may need development', 'Consider additional certifications'] : []
+    skills_match: Math.min(100, Math.max(30, skillsPct)),
+    experience_match: Math.min(100, expPct),
+    industry_match: industryMatch ? Math.min(100, score + 10) : Math.max(30, score - 15),
+    matched_skills: matchedSkills.slice(0, 8),
+    summary: `${score}% semantic fit for ${job.title} at ${job.company}.`
   };
+}
+
+async function generateDetailedBreakdown(env, profile, job) {
+  const profileSummary = JSON.stringify({
+    skills: profile.skills,
+    job_history: profile.job_history,
+    education: profile.education,
+    certifications: profile.certifications,
+    years_of_experience: profile.years_of_experience,
+    industries: profile.industries
+  });
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a career fit analyst. Compare a candidate profile against a job posting and provide a detailed fit analysis. Return valid JSON only with this schema:
+{
+  "skills_match": <0-100>,
+  "skills_analysis": "2-3 sentences on skill alignment",
+  "matched_skills": ["skill1", "skill2"],
+  "missing_skills": ["skill1", "skill2"],
+  "experience_match": <0-100>,
+  "experience_analysis": "2-3 sentences on experience fit",
+  "industry_match": <0-100>,
+  "industry_analysis": "1-2 sentences on industry alignment",
+  "education_match": <0-100>,
+  "education_analysis": "1-2 sentences on education fit",
+  "leadership_match": <0-100>,
+  "leadership_analysis": "1-2 sentences on leadership/seniority fit",
+  "strengths": ["strength1", "strength2", "strength3"],
+  "gaps": ["gap1", "gap2"],
+  "recommendation": "2-3 sentence overall recommendation"
+}`
+        },
+        {
+          role: 'user',
+          content: `CANDIDATE PROFILE:\n${profileSummary}\n\nJOB POSTING:\nTitle: ${job.title}\nCompany: ${job.company}\nLocation: ${job.location}\nCategory: ${job.category || ''}\nDescription: ${(job.description || '').substring(0, 3000)}`
+        }
+      ],
+      max_tokens: 1500,
+      response_format: { type: 'json_object' }
+    })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  if (data.choices && data.choices[0]) {
+    return JSON.parse(data.choices[0].message.content);
+  }
+  throw new Error('No analysis returned');
 }
 
 function cosineSimilarity(a, b) {
@@ -612,21 +822,53 @@ async function getEmbedding(env, text) {
 
 // ── Adzuna Job Sync ──────────────────────────────────────────────────────────
 
+async function generateSearchQueries(env, profile) {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `Given this candidate profile, generate 20 SHORT job search queries (2-4 words each) for a job board API. Include:\n- ALL past job titles (they're qualified for similar roles)\n- Skill-based queries combining key skills with industries\n- Industry + function queries\n- Seniority-appropriate roles (manager, senior, director level)\nReturn JSON: {"queries": ["query1", "query2", ...]}\n\nExamples: "petroleum engineer", "strategy manager energy", "production engineer oil gas", "digital transformation consultant", "change management director"\n\nProfile:\n- ALL job titles held: ${(profile.job_history || []).map(j => j.title).join(', ')}\n- Skills: ${JSON.stringify(profile.skills)}\n- Industries: ${JSON.stringify(profile.industries)}\n- ${profile.years_of_experience} years experience\n- Education: ${(profile.education || []).map(e => e.degree).join(', ')}\n- Certifications: ${(profile.certifications || []).join(', ')}`
+      }],
+      max_tokens: 500,
+      response_format: { type: 'json_object' }
+    })
+  });
+  const data = await res.json();
+  if (data.choices && data.choices[0]) {
+    const parsed = JSON.parse(data.choices[0].message.content);
+    return parsed.queries || [];
+  }
+  return [];
+}
+
 const ADZUNA_APP_ID = 'fadb3c67';
 const ADZUNA_APP_KEY = '640323793fe920a505d836b4088a0201';
 
 async function handleSyncAdzunaJobs(request, env, cors) {
-  // Accept optional search queries and location in body
-  let queries = ['energy strategy manager', 'oil gas transformation', 'management consulting energy', 'digital transformation oil gas', 'operating model consultant'];
+  let queries = [];
   let location = 'Texas';
-  let perQuery = 10;
+  let perQuery = 5;
   
   try {
     const body = await request.json();
     if (body.queries) queries = body.queries;
     if (body.location) location = body.location;
     if (body.per_query) perQuery = body.per_query;
+    if (body.user_id) {
+      // Auto-generate queries from user profile
+      const profile = JSON.parse(await env.DATA.get(`profile:${body.user_id}`) || 'null');
+      if (profile && profile.structured_data && (!queries || !queries.length)) {
+        queries = await generateSearchQueries(env, profile.structured_data);
+      }
+    }
   } catch (e) { /* use defaults */ }
+
+  if (!queries.length) {
+    queries = ['strategy manager', 'digital transformation', 'management consulting', 'operations manager'];
+  }
 
   const seenIds = new Set();
   const allJobs = [];
@@ -668,25 +910,36 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     }
   }
 
-  // Clear old jobs and index
-  const oldIndexJson = await env.DATA.get('jobs_index') || '[]';
-  const oldIds = JSON.parse(oldIndexJson);
-  for (const oldId of oldIds) {
-    await env.DATA.delete(`job:${oldId}`);
+  // Load existing jobs index and build adzuna_id lookup
+  const existingIndexJson = await env.DATA.get('jobs_index') || '[]';
+  const existingIds = JSON.parse(existingIndexJson);
+  const existingAdzunaIds = new Set();
+  for (const eid of existingIds) {
+    const existingJob = JSON.parse(await env.DATA.get(`job:${eid}`) || 'null');
+    if (existingJob && existingJob.adzuna_id) existingAdzunaIds.add(existingJob.adzuna_id);
   }
 
-  // Store new jobs with embeddings
-  const jobIds = [];
+  // Filter out duplicates
+  const newJobs = allJobs.filter(j => !existingAdzunaIds.has(j.adzuna_id));
+
+  // Store new jobs with embeddings (with delay to avoid rate limits)
+  const newJobIds = [];
   let embedded = 0;
+  let failed = 0;
   
-  for (const j of allJobs) {
+  for (const j of newJobs) {
     const id = uuid();
     let embedding = null;
     try {
       embedding = await getEmbedding(env, `${j.title} at ${j.company}. ${j.location}. ${j.category}. ${j.description}`);
       embedded++;
     } catch (e) {
+      failed++;
       console.error('Embedding failed for:', j.title, e.message);
+      // Wait 1s on rate limit before continuing
+      if (e.message && e.message.includes('rate')) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
 
     const job = {
@@ -705,15 +958,37 @@ async function handleSyncAdzunaJobs(request, env, cors) {
       created_at: j.created
     };
     await env.DATA.put(`job:${id}`, JSON.stringify(job));
-    jobIds.push(id);
+    newJobIds.push(id);
   }
 
-  await env.DATA.put('jobs_index', JSON.stringify(jobIds));
+  // Append to existing index
+  const updatedIndex = [...existingIds, ...newJobIds];
+  await env.DATA.put('jobs_index', JSON.stringify(updatedIndex));
+
+  // Also try to embed any existing jobs that are missing embeddings
+  let backfilled = 0;
+  for (const eid of existingIds) {
+    const existingJob = JSON.parse(await env.DATA.get(`job:${eid}`) || 'null');
+    if (existingJob && !existingJob.embedding) {
+      try {
+        const emb = await getEmbedding(env, `${existingJob.title} at ${existingJob.company}. ${existingJob.location}. ${existingJob.category || ''}. ${existingJob.description}`);
+        existingJob.embedding = JSON.stringify(emb);
+        await env.DATA.put(`job:${eid}`, JSON.stringify(existingJob));
+        backfilled++;
+      } catch (e) {
+        // Rate limited, stop backfilling
+        break;
+      }
+    }
+  }
 
   return Response.json({
     ok: true,
-    jobs_synced: jobIds.length,
-    jobs_embedded: embedded,
+    total_jobs: updatedIndex.length,
+    new_jobs: newJobIds.length,
+    duplicates_skipped: allJobs.length - newJobs.length,
+    new_embedded: embedded,
+    backfilled: backfilled,
     queries_used: queries.length
   }, { headers: cors });
 }
