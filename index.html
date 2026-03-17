@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Candid8 — Know Your Fit Before You Apply</title>
+  <meta name="description" content="Upload your resume. See what you're actually qualified for. Find out what's within reach — and exactly how to get there.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --border: #1e1e2e;
+      --text: #e4e4e7;
+      --text-muted: #71717a;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --accent-glow: rgba(99, 102, 241, 0.15);
+      --green: #22c55e;
+    }
+    
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+    
+    /* Nav */
+    nav {
+      padding: 24px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    
+    .logo span { color: var(--accent); }
+    
+    .badge {
+      font-size: 0.75rem;
+      color: var(--accent);
+      border: 1px solid var(--border);
+      padding: 4px 12px;
+      border-radius: 20px;
+      background: var(--accent-glow);
+    }
+    
+    /* Hero */
+    .hero {
+      text-align: center;
+      padding: 80px 0 60px;
+    }
+    
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 700;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+      margin-bottom: 24px;
+    }
+    
+    .hero h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      max-width: 540px;
+      margin: 0 auto 40px;
+    }
+    
+    /* Waitlist form */
+    .waitlist {
+      display: flex;
+      gap: 12px;
+      max-width: 440px;
+      margin: 0 auto;
+      justify-content: center;
+    }
+    
+    .waitlist input {
+      flex: 1;
+      padding: 14px 18px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 1rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    
+    .waitlist input:focus {
+      border-color: var(--accent);
+    }
+    
+    .waitlist input::placeholder {
+      color: var(--text-muted);
+    }
+    
+    .waitlist button {
+      padding: 14px 28px;
+      border-radius: 10px;
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-size: 1rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    
+    .waitlist button:hover {
+      background: var(--accent-hover);
+    }
+    
+    .waitlist button:active {
+      transform: scale(0.98);
+    }
+    
+    .waitlist-msg {
+      text-align: center;
+      margin-top: 12px;
+      font-size: 0.875rem;
+      color: var(--green);
+      min-height: 1.4em;
+    }
+    
+    .waitlist-count {
+      text-align: center;
+      margin-top: 16px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    
+    /* How it works */
+    .how {
+      padding: 80px 0;
+    }
+    
+    .how h2 {
+      text-align: center;
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 48px;
+      letter-spacing: -0.02em;
+    }
+    
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 24px;
+    }
+    
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px 24px;
+      text-align: center;
+    }
+    
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--accent-glow);
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+    }
+    
+    .step h3 {
+      font-size: 1.05rem;
+      margin-bottom: 8px;
+    }
+    
+    .step p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+    
+    /* Features */
+    .features {
+      padding: 40px 0 80px;
+    }
+    
+    .features h2 {
+      text-align: center;
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 48px;
+      letter-spacing: -0.02em;
+    }
+    
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    
+    .feature {
+      display: flex;
+      gap: 16px;
+      padding: 20px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    
+    .feature-icon {
+      font-size: 1.5rem;
+      flex-shrink: 0;
+      width: 40px;
+      text-align: center;
+    }
+    
+    .feature h3 {
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+    
+    .feature p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    
+    /* CTA */
+    .cta {
+      text-align: center;
+      padding: 60px 0;
+      border-top: 1px solid var(--border);
+    }
+    
+    .cta h2 {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+    }
+    
+    .cta p {
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+    
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 32px 0;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      border-top: 1px solid var(--border);
+    }
+    
+    /* Mobile */
+    @media (max-width: 480px) {
+      .waitlist {
+        flex-direction: column;
+      }
+      .hero { padding: 50px 0 40px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav>
+      <div class="logo">candid<span>8</span></div>
+      <div class="badge">Coming Soon</div>
+    </nav>
+    
+    <section class="hero">
+      <h1>Know your <em>fit</em> before<br>you apply</h1>
+      <p>Upload your resume. See what you're actually qualified for. Find out what's within reach — and exactly how to get there.</p>
+      
+      <form class="waitlist" id="waitlistForm">
+        <input type="email" id="emailInput" placeholder="you@email.com" required>
+        <button type="submit">Join Waitlist</button>
+      </form>
+      <div class="waitlist-msg" id="waitlistMsg"></div>
+      <div class="waitlist-count" id="waitlistCount"></div>
+    </section>
+    
+    <section class="how">
+      <h2>How it works</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h3>Upload</h3>
+          <p>Drop in resumes, bios, old CVs — anything that tells your story. More docs = richer profile.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h3>Match</h3>
+          <p>We scan thousands of live openings and rank them by real fit — not keyword tricks.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h3>Discover</h3>
+          <p>See roles you didn't know you qualified for. Get alerts when new high-match jobs appear.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <h3>Close the gap</h3>
+          <p>Find out what's missing for stretch roles — and get a plan to get there.</p>
+        </div>
+      </div>
+    </section>
+    
+    <section class="features">
+      <h2>Not another job board</h2>
+      <div class="feature-grid">
+        <div class="feature">
+          <div class="feature-icon">🎯</div>
+          <div>
+            <h3>Transparent % Fit</h3>
+            <p>See exactly why you match — skills, experience, education, industry. No black boxes.</p>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">📄</div>
+          <div>
+            <h3>Multi-Doc Profile</h3>
+            <p>Upload old resumes, bios, certs. Candid8 builds a richer picture than any single resume.</p>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">🔔</div>
+          <div>
+            <h3>Smart Alerts</h3>
+            <p>New job hits your threshold? You'll know. No noise, just signal.</p>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">🧭</div>
+          <div>
+            <h3>Gap Analysis</h3>
+            <p>"You're 78% fit. Here's what's missing — and how to close the gap in 6 months."</p>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">📈</div>
+          <div>
+            <h3>Career Arc</h3>
+            <p>See where people like you go next. Map your trajectory, not just your next job.</p>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">🔒</div>
+          <div>
+            <h3>Private by Default</h3>
+            <p>Your data stays yours. No employer alerts. Browse freely.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+    
+    <section class="cta">
+      <h2>Ready to see your fit?</h2>
+      <p>Join the waitlist. Be first to know when Candid8 launches.</p>
+      <form class="waitlist" id="waitlistForm2">
+        <input type="email" id="emailInput2" placeholder="you@email.com" required>
+        <button type="submit">Join Waitlist</button>
+      </form>
+      <div class="waitlist-msg" id="waitlistMsg2"></div>
+    </section>
+    
+    <footer>
+      &copy; 2026 Candid8. All rights reserved.
+    </footer>
+  </div>
+  
+  <script>
+    async function submitWaitlist(email, msgEl) {
+      try {
+        const res = await fetch('/api/waitlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          msgEl.textContent = "You're on the list! We'll be in touch.";
+          msgEl.style.color = 'var(--green)';
+          updateCount();
+        } else {
+          msgEl.textContent = data.error || 'Something went wrong. Try again.';
+          msgEl.style.color = '#ef4444';
+        }
+      } catch (e) {
+        msgEl.textContent = 'Something went wrong. Try again.';
+        msgEl.style.color = '#ef4444';
+      }
+    }
+    
+    async function updateCount() {
+      try {
+        const res = await fetch('/api/waitlist/count');
+        const data = await res.json();
+        const el = document.getElementById('waitlistCount');
+        if (data.count > 0) {
+          el.textContent = `${data.count} ${data.count === 1 ? 'person' : 'people'} on the waitlist`;
+        }
+      } catch (e) {}
+    }
+    
+    document.getElementById('waitlistForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = document.getElementById('emailInput').value;
+      submitWaitlist(email, document.getElementById('waitlistMsg'));
+    });
+    
+    document.getElementById('waitlistForm2').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = document.getElementById('emailInput2').value;
+      submitWaitlist(email, document.getElementById('waitlistMsg2'));
+    });
+    
+    updateCount();
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+name = "candid8-api"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "WAITLIST"
+id = "" # Will be filled after KV namespace creation
+
+[routes]
+pattern = "candid8.fit/api/*"
