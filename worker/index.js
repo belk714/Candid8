@@ -108,6 +108,12 @@ async function route(url, request, env, cors) {
   // Job locations for autocomplete
   if (path === '/api/jobs/locations' && method === 'GET') return handleGetJobLocations(env, cors);
 
+  // Full job description
+  if (path.startsWith('/api/jobs/') && path.endsWith('/description') && method === 'GET') {
+    const jobId = path.split('/api/jobs/')[1].replace('/description', '');
+    return handleGetFullDescription(jobId, request, env, cors);
+  }
+
   // Admin: seed jobs
   if (path === '/api/admin/seed-jobs' && method === 'POST') return handleSeedJobs(env, cors);
 
@@ -449,6 +455,40 @@ function jobMatchesLocationFilter(job, locations, radius) {
   return false;
 }
 
+async function handleGetFullDescription(jobId, request, env, cors) {
+  await requireAuth(request, env);
+  const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
+  if (!job) return Response.json({ ok: false, error: 'Job not found' }, { status: 404, headers: cors });
+
+  // Return cached full description if we have it
+  if (job.full_description) {
+    return Response.json({ ok: true, description: job.full_description }, { headers: cors });
+  }
+
+  // Scrape from Adzuna page
+  if (job.url) {
+    try {
+      const res = await fetch(job.url, { headers: { 'User-Agent': 'Candid8/1.0' }, redirect: 'follow' });
+      const html = await res.text();
+      // Extract from adp-body section
+      const match = html.match(/adp-body[^>]*>([\s\S]*?)<\/section/);
+      if (match) {
+        const fullDesc = match[1].replace(/<[^>]+>/g, '\n').replace(/\n\s*\n/g, '\n').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#\d+;/g, '').replace(/&nbsp;/g, ' ').trim();
+        if (fullDesc.length > job.description.length) {
+          job.full_description = fullDesc;
+          await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
+          return Response.json({ ok: true, description: fullDesc }, { headers: cors });
+        }
+      }
+    } catch (e) {
+      console.error('Scrape failed:', e.message);
+    }
+  }
+
+  // Fallback to truncated description
+  return Response.json({ ok: true, description: job.description }, { headers: cors });
+}
+
 async function handleGetJobLocations(env, cors) {
   return Response.json({ ok: true, locations: Object.keys(MAJOR_METROS) }, { headers: cors });
 }
@@ -571,25 +611,68 @@ async function computeMatches(userId, env, profile) {
 function generateBreakdown(profile, job, score) {
   // Quick deterministic breakdown for list view (not GPT — that's on-demand in detail)
   const desc = (job.description || '').toLowerCase();
-  const skills = [...(profile?.skills?.technical || []), ...(profile?.skills?.soft || [])];
-  const matchedSkills = skills.filter(s => desc.includes(s.toLowerCase()));
-  const skillsPct = skills.length ? Math.round((matchedSkills.length / Math.min(skills.length, 10)) * 100) : score;
+  const titleDesc = ((job.title || '') + ' ' + (job.description || '')).toLowerCase();
+  
+  // Skills analysis
+  const techSkills = profile?.skills?.technical || [];
+  const softSkills = profile?.skills?.soft || [];
+  const allSkills = [...techSkills, ...softSkills];
+  const matchedTech = techSkills.filter(s => titleDesc.includes(s.toLowerCase()));
+  const unmatchedTech = techSkills.filter(s => !titleDesc.includes(s.toLowerCase()));
+  const matchedSoft = softSkills.filter(s => titleDesc.includes(s.toLowerCase()));
+  const unmatchedSoft = softSkills.filter(s => !titleDesc.includes(s.toLowerCase()));
+  const totalMatched = matchedTech.length + matchedSoft.length;
+  const skillsPct = allSkills.length ? Math.round((totalMatched / allSkills.length) * 100) : score;
 
-  const profileIndustries = (profile?.industries || []).map(i => i.toLowerCase());
+  // Industry analysis
+  const profileIndustries = (profile?.industries || []);
   const jobCat = (job.category || job.title || '').toLowerCase();
-  const industryMatch = profileIndustries.some(i => desc.includes(i) || jobCat.includes(i));
+  const matchedIndustries = profileIndustries.filter(i => desc.includes(i.toLowerCase()) || jobCat.includes(i.toLowerCase()));
+  const industryMatch = matchedIndustries.length > 0;
 
+  // Experience analysis
   const yoe = profile?.years_of_experience || 0;
   const seniorTerms = ['senior', 'lead', 'principal', 'director', 'vp', 'manager'];
   const jobSeniority = seniorTerms.some(t => (job.title || '').toLowerCase().includes(t));
   const expPct = yoe >= 10 ? (jobSeniority ? 90 : 80) : yoe >= 5 ? (jobSeniority ? 65 : 80) : 55;
+  const expReason = yoe >= 10 && jobSeniority ? `${yoe} years experience aligns with senior-level role` :
+                    yoe >= 10 ? `${yoe} years experience (role may not require seniority)` :
+                    `${yoe} years experience`;
+
+  // Job history title match
+  const jobHistory = profile?.job_history || [];
+  const titleMatches = jobHistory.filter(jh => {
+    const jhTitle = (jh.title || '').toLowerCase();
+    const jobTitle = (job.title || '').toLowerCase();
+    return jobTitle.split(/\s+/).some(w => w.length > 3 && jhTitle.includes(w)) ||
+           jhTitle.split(/\s+/).some(w => w.length > 3 && jobTitle.includes(w));
+  });
 
   return {
     overall: score,
-    skills_match: Math.min(100, Math.max(30, skillsPct)),
+    skills_match: Math.min(100, Math.max(20, skillsPct)),
+    skills_detail: {
+      matched_technical: matchedTech,
+      unmatched_technical: unmatchedTech,
+      matched_soft: matchedSoft,
+      unmatched_soft: unmatchedSoft,
+      total: allSkills.length,
+      total_matched: totalMatched
+    },
     experience_match: Math.min(100, expPct),
+    experience_detail: {
+      years: yoe,
+      seniority_match: jobSeniority,
+      reason: expReason,
+      related_roles: titleMatches.map(j => j.title).slice(0, 3)
+    },
     industry_match: industryMatch ? Math.min(100, score + 10) : Math.max(30, score - 15),
-    matched_skills: matchedSkills.slice(0, 8),
+    industry_detail: {
+      profile_industries: profileIndustries,
+      matched: matchedIndustries,
+      job_category: job.category || ''
+    },
+    matched_skills: [...matchedTech, ...matchedSoft].slice(0, 8),
     summary: `${score}% semantic fit for ${job.title} at ${job.company}.`
   };
 }

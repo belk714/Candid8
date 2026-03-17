@@ -35382,6 +35382,10 @@ async function route(url, request, env, cors) {
     return handleGetMatchDetail(request, env, cors, jobId);
   }
   if (path === "/api/jobs/locations" && method === "GET") return handleGetJobLocations(env, cors);
+  if (path.startsWith("/api/jobs/") && path.endsWith("/description") && method === "GET") {
+    const jobId = path.split("/api/jobs/")[1].replace("/description", "");
+    return handleGetFullDescription(jobId, request, env, cors);
+  }
   if (path === "/api/admin/seed-jobs" && method === "POST") return handleSeedJobs(env, cors);
   if (path === "/api/admin/sync-jobs" && method === "POST") return handleSyncAdzunaJobs(request, env, cors);
   return new Response("Not found", { status: 404, headers: cors });
@@ -35645,6 +35649,32 @@ function jobMatchesLocationFilter(job, locations, radius) {
   }
   return false;
 }
+async function handleGetFullDescription(jobId, request, env, cors) {
+  await requireAuth(request, env);
+  const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
+  if (!job) return Response.json({ ok: false, error: "Job not found" }, { status: 404, headers: cors });
+  if (job.full_description) {
+    return Response.json({ ok: true, description: job.full_description }, { headers: cors });
+  }
+  if (job.url) {
+    try {
+      const res = await fetch(job.url, { headers: { "User-Agent": "Candid8/1.0" }, redirect: "follow" });
+      const html = await res.text();
+      const match = html.match(/adp-body[^>]*>([\s\S]*?)<\/section/);
+      if (match) {
+        const fullDesc = match[1].replace(/<[^>]+>/g, "\n").replace(/\n\s*\n/g, "\n").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#\d+;/g, "").replace(/&nbsp;/g, " ").trim();
+        if (fullDesc.length > job.description.length) {
+          job.full_description = fullDesc;
+          await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
+          return Response.json({ ok: true, description: fullDesc }, { headers: cors });
+        }
+      }
+    } catch (e2) {
+      console.error("Scrape failed:", e2.message);
+    }
+  }
+  return Response.json({ ok: true, description: job.description }, { headers: cors });
+}
 async function handleGetJobLocations(env, cors) {
   return Response.json({ ok: true, locations: Object.keys(MAJOR_METROS) }, { headers: cors });
 }
@@ -35744,22 +35774,56 @@ async function computeMatches(userId, env, profile) {
 }
 function generateBreakdown(profile, job, score) {
   const desc = (job.description || "").toLowerCase();
-  const skills = [...profile?.skills?.technical || [], ...profile?.skills?.soft || []];
-  const matchedSkills = skills.filter((s2) => desc.includes(s2.toLowerCase()));
-  const skillsPct = skills.length ? Math.round(matchedSkills.length / Math.min(skills.length, 10) * 100) : score;
-  const profileIndustries = (profile?.industries || []).map((i2) => i2.toLowerCase());
+  const titleDesc = ((job.title || "") + " " + (job.description || "")).toLowerCase();
+  const techSkills = profile?.skills?.technical || [];
+  const softSkills = profile?.skills?.soft || [];
+  const allSkills = [...techSkills, ...softSkills];
+  const matchedTech = techSkills.filter((s2) => titleDesc.includes(s2.toLowerCase()));
+  const unmatchedTech = techSkills.filter((s2) => !titleDesc.includes(s2.toLowerCase()));
+  const matchedSoft = softSkills.filter((s2) => titleDesc.includes(s2.toLowerCase()));
+  const unmatchedSoft = softSkills.filter((s2) => !titleDesc.includes(s2.toLowerCase()));
+  const totalMatched = matchedTech.length + matchedSoft.length;
+  const skillsPct = allSkills.length ? Math.round(totalMatched / allSkills.length * 100) : score;
+  const profileIndustries = profile?.industries || [];
   const jobCat = (job.category || job.title || "").toLowerCase();
-  const industryMatch = profileIndustries.some((i2) => desc.includes(i2) || jobCat.includes(i2));
+  const matchedIndustries = profileIndustries.filter((i2) => desc.includes(i2.toLowerCase()) || jobCat.includes(i2.toLowerCase()));
+  const industryMatch = matchedIndustries.length > 0;
   const yoe = profile?.years_of_experience || 0;
   const seniorTerms = ["senior", "lead", "principal", "director", "vp", "manager"];
   const jobSeniority = seniorTerms.some((t2) => (job.title || "").toLowerCase().includes(t2));
   const expPct = yoe >= 10 ? jobSeniority ? 90 : 80 : yoe >= 5 ? jobSeniority ? 65 : 80 : 55;
+  const expReason = yoe >= 10 && jobSeniority ? `${yoe} years experience aligns with senior-level role` : yoe >= 10 ? `${yoe} years experience (role may not require seniority)` : `${yoe} years experience`;
+  const jobHistory = profile?.job_history || [];
+  const titleMatches = jobHistory.filter((jh) => {
+    const jhTitle = (jh.title || "").toLowerCase();
+    const jobTitle = (job.title || "").toLowerCase();
+    return jobTitle.split(/\s+/).some((w2) => w2.length > 3 && jhTitle.includes(w2)) || jhTitle.split(/\s+/).some((w2) => w2.length > 3 && jobTitle.includes(w2));
+  });
   return {
     overall: score,
-    skills_match: Math.min(100, Math.max(30, skillsPct)),
+    skills_match: Math.min(100, Math.max(20, skillsPct)),
+    skills_detail: {
+      matched_technical: matchedTech,
+      unmatched_technical: unmatchedTech,
+      matched_soft: matchedSoft,
+      unmatched_soft: unmatchedSoft,
+      total: allSkills.length,
+      total_matched: totalMatched
+    },
     experience_match: Math.min(100, expPct),
+    experience_detail: {
+      years: yoe,
+      seniority_match: jobSeniority,
+      reason: expReason,
+      related_roles: titleMatches.map((j2) => j2.title).slice(0, 3)
+    },
     industry_match: industryMatch ? Math.min(100, score + 10) : Math.max(30, score - 15),
-    matched_skills: matchedSkills.slice(0, 8),
+    industry_detail: {
+      profile_industries: profileIndustries,
+      matched: matchedIndustries,
+      job_category: job.category || ""
+    },
+    matched_skills: [...matchedTech, ...matchedSoft].slice(0, 8),
     summary: `${score}% semantic fit for ${job.title} at ${job.company}.`
   };
 }

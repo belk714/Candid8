@@ -82,6 +82,9 @@
     .loc-dropdown .loc-option:hover { background: var(--primary); color: #fff; }
     .analysis-text { font-size: .8rem; color: var(--text-muted); margin: 2px 0 12px 0; padding-left: 122px; }
     .analysis-pills { font-size: .8rem; margin-bottom: 12px; padding-left: 122px; }
+    .breakdown-detail { font-size: .8rem; color: var(--text-muted); margin: 4px 0 14px 122px; padding: 8px 12px; background: var(--surface2); border-radius: 8px; }
+    .detail-stat { font-size: .8rem; display: block; margin-bottom: 4px; }
+    .detail-label { font-size: .75rem; font-weight: 600; margin-right: 4px; }
     .tag .remove { cursor: pointer; margin-left: 6px; opacity: 0.7; }
     .tag .remove:hover { opacity: 1; }
 
@@ -524,9 +527,28 @@
                 <div class="quick-view" style="display:none">
                   <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.summary || ''}</p>
                   ${breakdownBar('Skills', b.skills_match)}
+                  ${b.skills_detail ? `<div class="breakdown-detail">
+                    <span class="detail-stat">${b.skills_detail.total_matched}/${b.skills_detail.total} skills found in description</span>
+                    ${b.skills_detail.matched_technical?.length ? `<div style="margin:4px 0"><span class="detail-label">✓ Technical:</span> ${b.skills_detail.matched_technical.map(s=>`<span class="tag" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
+                    ${b.skills_detail.matched_soft?.length ? `<div style="margin:4px 0"><span class="detail-label">✓ Soft:</span> ${b.skills_detail.matched_soft.map(s=>`<span class="tag soft" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
+                    ${b.skills_detail.unmatched_technical?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--text-muted)">Not found:</span> ${b.skills_detail.unmatched_technical.map(s=>`<span class="tag" style="font-size:.7rem;opacity:.4">${s}</span>`).join(' ')}</div>` : ''}
+                  </div>` : ''}
                   ${breakdownBar('Experience', b.experience_match)}
+                  ${b.experience_detail ? `<div class="breakdown-detail">
+                    <span class="detail-stat">${b.experience_detail.reason}</span>
+                    ${b.experience_detail.related_roles?.length ? `<div style="margin:4px 0"><span class="detail-label">Related roles:</span> ${b.experience_detail.related_roles.map(r=>`<span class="tag" style="font-size:.7rem">${r}</span>`).join(' ')}</div>` : ''}
+                  </div>` : ''}
                   ${breakdownBar('Industry', b.industry_match)}
-                  <p style="font-size:.75rem;color:var(--text-muted);margin:8px 0 12px;font-style:italic">Scores are rough estimates based on keyword matching</p>
+                  ${b.industry_detail ? `<div class="breakdown-detail">
+                    ${b.industry_detail.matched?.length ? `<span class="detail-stat">✓ Matched: ${b.industry_detail.matched.join(', ')}</span>` : `<span class="detail-stat" style="color:var(--text-muted)">No direct industry keyword match</span>`}
+                    ${b.industry_detail.job_category ? `<div style="margin-top:2px"><span class="detail-label">Category:</span> ${b.industry_detail.job_category}</div>` : ''}
+                  </div>` : ''}
+                  <details style="margin:8px 0 12px" onclick="event.stopPropagation();loadFullDescription(this,'${m.job.id}')">
+                    <summary style="cursor:pointer;font-size:.85rem;color:var(--accent)">📄 Full Job Description</summary>
+                    <div class="full-desc" style="font-size:.8rem;color:var(--text-muted);margin-top:8px;white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:12px;background:var(--surface2);border-radius:8px"><div class="spinner" style="margin:8px auto"></div></div>
+                  </details>
+                  ${m.job.url ? `<a href="${m.job.url}" target="_blank" onclick="event.stopPropagation()" style="display:inline-block;margin-bottom:12px;color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
+                  <p style="font-size:.75rem;color:var(--text-muted);margin:4px 0 12px;font-style:italic">Scores are rough estimates based on keyword matching</p>
                   <button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">🔍 Run Detailed AI Analysis</button>
                   <div id="detailed-${m.job.id}"></div>
                 </div>
@@ -535,6 +557,21 @@
         }).join('');
       } catch (ex) {
         el.innerHTML = '<div class="empty-state"><p>Failed to load matches.</p></div>';
+      }
+    }
+
+    async function loadFullDescription(details, jobId) {
+      const container = details.querySelector('.full-desc');
+      if (container.dataset.loaded) return;
+      try {
+        const res = await fetch(`${API}/jobs/${jobId}/description`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.ok) {
+          container.textContent = data.description;
+          container.dataset.loaded = 'true';
+        }
+      } catch (ex) {
+        container.textContent = 'Failed to load description';
       }
     }
 
@@ -607,8 +644,6 @@
           </div>
           ${b.strengths?.length ? `<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">✓ Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.strengths.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
           ${b.gaps?.length ? `<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">⚠ Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.gaps.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
-          ${job.description ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-size:.85rem;color:var(--accent)">Full Job Description</summary><p style="font-size:.8rem;color:var(--text-muted);margin-top:8px;white-space:pre-wrap">${job.description}</p></details>` : ''}
-          ${job.url ? `<a href="${job.url}" target="_blank" style="display:inline-block;margin-top:12px;color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
           <p style="font-size:.7rem;color:var(--text-muted);margin-top:12px;font-style:italic">✓ Detailed AI analysis — score based on weighted skills, experience, industry, education & leadership fit</p>
         `;
       } catch (ex) {
