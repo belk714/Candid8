@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Candid8 — Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a26; --border: #1e1e2e;
+      --text: #e4e4e7; --text-muted: #71717a; --accent: #6366f1; --accent-hover: #818cf8;
+      --accent-glow: rgba(99, 102, 241, 0.15); --green: #22c55e; --yellow: #eab308; --red: #ef4444;
+    }
+    body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh; }
+    
+    /* Auth Screen */
+    .auth-container { max-width: 400px; margin: 0 auto; padding: 80px 24px; }
+    .auth-container .logo { font-size: 2rem; font-weight: 700; text-align: center; margin-bottom: 40px; }
+    .auth-container .logo span { color: var(--accent); }
+    .auth-tabs { display: flex; gap: 0; margin-bottom: 24px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+    .auth-tab { flex: 1; padding: 12px; text-align: center; background: var(--surface); cursor: pointer; font-weight: 600; color: var(--text-muted); transition: all .2s; border: none; font-family: inherit; font-size: .95rem; }
+    .auth-tab.active { background: var(--accent); color: white; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: .85rem; color: var(--text-muted); margin-bottom: 6px; }
+    .form-group input { width: 100%; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 1rem; font-family: inherit; outline: none; transition: border-color .2s; }
+    .form-group input:focus { border-color: var(--accent); }
+    .btn { width: 100%; padding: 14px; border-radius: 10px; border: none; background: var(--accent); color: white; font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; transition: background .2s; }
+    .btn:hover { background: var(--accent-hover); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+    .btn-secondary:hover { background: var(--surface2); }
+    .error-msg { color: var(--red); font-size: .85rem; margin-top: 8px; text-align: center; min-height: 1.2em; }
+
+    /* Dashboard Layout */
+    .app { display: none; }
+    .app.active { display: flex; min-height: 100vh; }
+    .sidebar { width: 240px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px 0; flex-shrink: 0; display: flex; flex-direction: column; }
+    .sidebar .logo { font-size: 1.3rem; font-weight: 700; padding: 0 20px; margin-bottom: 32px; }
+    .sidebar .logo span { color: var(--accent); }
+    .nav-item { padding: 10px 20px; cursor: pointer; color: var(--text-muted); font-size: .9rem; font-weight: 500; transition: all .15s; display: flex; align-items: center; gap: 10px; }
+    .nav-item:hover { color: var(--text); background: var(--accent-glow); }
+    .nav-item.active { color: var(--accent); background: var(--accent-glow); border-right: 2px solid var(--accent); }
+    .nav-item .icon { width: 20px; text-align: center; }
+    .sidebar-spacer { flex: 1; }
+    .sidebar .logout { padding: 10px 20px; cursor: pointer; color: var(--text-muted); font-size: .85rem; transition: color .15s; }
+    .sidebar .logout:hover { color: var(--red); }
+    .main { flex: 1; padding: 32px; overflow-y: auto; max-height: 100vh; }
+    .main h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 24px; }
+
+    /* Cards */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; margin-bottom: 16px; }
+    .card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; }
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+
+    /* Tags */
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: .78rem; font-weight: 500; background: var(--accent-glow); color: var(--accent); }
+    .tag.soft { background: rgba(34,197,94,.12); color: var(--green); }
+
+    /* Profile */
+    .profile-section { margin-bottom: 20px; }
+    .profile-section h4 { font-size: .85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+    .job-history-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .job-history-item:last-child { border-bottom: none; }
+    .job-history-item .title { font-weight: 600; }
+    .job-history-item .meta { font-size: .85rem; color: var(--text-muted); }
+
+    /* Documents */
+    .drop-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 40px; text-align: center; cursor: pointer; transition: all .2s; margin-bottom: 16px; }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); background: var(--accent-glow); }
+    .drop-zone p { color: var(--text-muted); margin-top: 8px; font-size: .9rem; }
+    .doc-list { list-style: none; }
+    .doc-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--surface2); border-radius: 10px; margin-bottom: 8px; }
+    .doc-item .name { font-weight: 500; }
+    .doc-item .date { font-size: .8rem; color: var(--text-muted); }
+
+    /* Matches */
+    .match-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 12px; cursor: pointer; transition: all .15s; }
+    .match-card:hover { border-color: var(--accent); }
+    .match-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .match-info h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; }
+    .match-info .company { color: var(--accent); font-weight: 500; }
+    .match-info .location { font-size: .85rem; color: var(--text-muted); }
+    .match-info .salary { font-size: .85rem; color: var(--green); margin-top: 4px; }
+    .score-badge { font-size: 1.5rem; font-weight: 700; min-width: 64px; text-align: center; padding: 8px 12px; border-radius: 12px; }
+    .score-green { color: var(--green); background: rgba(34,197,94,.1); }
+    .score-yellow { color: var(--yellow); background: rgba(234,179,8,.1); }
+    .score-red { color: var(--red); background: rgba(239,68,68,.1); }
+    .match-detail { display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+    .match-detail.open { display: block; }
+    .breakdown-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .breakdown-label { font-size: .8rem; color: var(--text-muted); width: 110px; }
+    .breakdown-track { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+    .breakdown-fill { height: 100%; border-radius: 4px; transition: width .5s; }
+    .breakdown-val { font-size: .8rem; font-weight: 600; width: 36px; text-align: right; }
+
+    /* Settings */
+    .settings-form .form-group { margin-bottom: 20px; }
+    .settings-form input, .settings-form select { width: 100%; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 1rem; font-family: inherit; outline: none; }
+    .settings-form input:focus, .settings-form select:focus { border-color: var(--accent); }
+    .row { display: flex; gap: 12px; }
+    .row > * { flex: 1; }
+
+    /* Empty state */
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .empty-state p { max-width: 360px; margin: 0 auto; }
+
+    /* Loading */
+    .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-overlay { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; color: var(--text-muted); }
+
+    /* Mobile */
+    .mobile-header { display: none; padding: 16px 20px; background: var(--surface); border-bottom: 1px solid var(--border); justify-content: space-between; align-items: center; }
+    .mobile-header .logo { font-size: 1.2rem; font-weight: 700; }
+    .mobile-header .logo span { color: var(--accent); }
+    .hamburger { background: none; border: none; color: var(--text); font-size: 1.5rem; cursor: pointer; }
+    @media (max-width: 768px) {
+      .sidebar { position: fixed; left: -260px; top: 0; bottom: 0; z-index: 100; transition: left .25s; }
+      .sidebar.open { left: 0; }
+      .mobile-header { display: flex; }
+      .main { padding: 20px 16px; max-height: none; }
+      .app.active { flex-direction: column; }
+      .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 99; }
+      .overlay.open { display: block; }
+      .match-header { flex-direction: column; }
+      .score-badge { align-self: flex-start; }
+    }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 20px; font-size: .9rem; z-index: 200; transform: translateY(100px); opacity: 0; transition: all .3s; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.error { border-color: var(--red); color: var(--red); }
+    .toast.success { border-color: var(--green); color: var(--green); }
+  </style>
+</head>
+<body>
+  <!-- Auth Screen -->
+  <div id="authScreen" class="auth-container">
+    <div class="logo">candid<span>8</span></div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="showAuthTab('login')">Log In</button>
+      <button class="auth-tab" onclick="showAuthTab('signup')">Sign Up</button>
+    </div>
+    <form id="authForm" onsubmit="handleAuth(event)">
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="authEmail" required placeholder="you@email.com">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="authPassword" required placeholder="••••••••" minlength="6">
+      </div>
+      <button type="submit" class="btn" id="authBtn">Log In</button>
+      <div class="error-msg" id="authError"></div>
+    </form>
+  </div>
+
+  <!-- App Dashboard -->
+  <div id="appDashboard" class="app">
+    <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
+    <div class="mobile-header">
+      <div class="logo">candid<span>8</span></div>
+      <button class="hamburger" onclick="toggleSidebar()">☰</button>
+    </div>
+    <aside class="sidebar" id="sidebar">
+      <div class="logo">candid<span>8</span></div>
+      <div class="nav-item active" data-tab="profile" onclick="switchTab('profile')"><span class="icon">👤</span> Profile</div>
+      <div class="nav-item" data-tab="documents" onclick="switchTab('documents')"><span class="icon">📄</span> Documents</div>
+      <div class="nav-item" data-tab="matches" onclick="switchTab('matches')"><span class="icon">🎯</span> Matches</div>
+      <div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span> Settings</div>
+      <div class="sidebar-spacer"></div>
+      <div class="logout" onclick="logout()">← Log out</div>
+    </aside>
+    <main class="main">
+      <!-- Profile Tab -->
+      <div class="tab-content" id="tab-profile">
+        <h1>Your Profile</h1>
+        <div id="profileContent"><div class="loading-overlay"><div class="spinner"></div> Loading profile...</div></div>
+      </div>
+      <!-- Documents Tab -->
+      <div class="tab-content" id="tab-documents" style="display:none">
+        <h1>Documents</h1>
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <div style="font-size:2rem">📁</div>
+          <p>Drop your resume here or click to browse<br><span style="font-size:.8rem">PDF, DOCX, or TXT</span></p>
+        </div>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt" style="display:none" onchange="uploadFile(this.files[0])">
+        <div id="docList"></div>
+      </div>
+      <!-- Matches Tab -->
+      <div class="tab-content" id="tab-matches" style="display:none">
+        <h1>Job Matches</h1>
+        <div id="matchesContent"><div class="loading-overlay"><div class="spinner"></div> Loading matches...</div></div>
+      </div>
+      <!-- Settings Tab -->
+      <div class="tab-content" id="tab-settings" style="display:none">
+        <h1>Settings</h1>
+        <div class="card">
+          <h3>Preferences</h3>
+          <form class="settings-form" onsubmit="saveSettings(event)">
+            <div class="form-group">
+              <label>Preferred Location</label>
+              <input type="text" id="settGeo" placeholder="e.g. San Francisco, Remote">
+            </div>
+            <div class="row">
+              <div class="form-group">
+                <label>Min Salary ($)</label>
+                <input type="number" id="settSalMin" placeholder="100000">
+              </div>
+              <div class="form-group">
+                <label>Max Salary ($)</label>
+                <input type="number" id="settSalMax" placeholder="200000">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Industries (comma-separated)</label>
+              <input type="text" id="settIndustries" placeholder="Tech, Finance, Healthcare">
+            </div>
+            <button type="submit" class="btn">Save Preferences</button>
+          </form>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const API = 'https://candid8-api.belk714.workers.dev/api';
+    let authMode = 'login';
+    let token = localStorage.getItem('candid8_token');
+    let currentUser = JSON.parse(localStorage.getItem('candid8_user') || 'null');
+
+    // ── Init ──
+    if (token && currentUser) {
+      showApp();
+    }
+
+    // ── Auth ──
+    function showAuthTab(mode) {
+      authMode = mode;
+      document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+      document.querySelector(`.auth-tab:${mode === 'login' ? 'first-child' : 'last-child'}`).classList.add('active');
+      document.getElementById('authBtn').textContent = mode === 'login' ? 'Log In' : 'Sign Up';
+      document.getElementById('authError').textContent = '';
+    }
+
+    async function handleAuth(e) {
+      e.preventDefault();
+      const email = document.getElementById('authEmail').value;
+      const password = document.getElementById('authPassword').value;
+      const btn = document.getElementById('authBtn');
+      const err = document.getElementById('authError');
+      btn.disabled = true;
+      err.textContent = '';
+      
+      try {
+        const res = await fetch(`${API}/auth/${authMode}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Failed');
+        token = data.token;
+        currentUser = data.user;
+        localStorage.setItem('candid8_token', token);
+        localStorage.setItem('candid8_user', JSON.stringify(currentUser));
+        showApp();
+      } catch (ex) {
+        err.textContent = ex.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function logout() {
+      token = null; currentUser = null;
+      localStorage.removeItem('candid8_token');
+      localStorage.removeItem('candid8_user');
+      document.getElementById('authScreen').style.display = '';
+      document.getElementById('appDashboard').classList.remove('active');
+    }
+
+    function showApp() {
+      document.getElementById('authScreen').style.display = 'none';
+      document.getElementById('appDashboard').classList.add('active');
+      loadProfile();
+      loadDocuments();
+      loadMatches();
+      loadSettings();
+    }
+
+    // ── Navigation ──
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+      document.getElementById(`tab-${tab}`).style.display = '';
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
+      if (window.innerWidth < 769) toggleSidebar();
+    }
+
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('open');
+      document.getElementById('overlay').classList.toggle('open');
+    }
+
+    // ── API helpers ──
+    function authHeaders() {
+      return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+    }
+
+    function toast(msg, type = 'success') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = `toast ${type} show`;
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    function formatSalary(n) {
+      if (!n) return '';
+      return '$' + (n / 1000).toFixed(0) + 'k';
+    }
+
+    function scoreClass(s) {
+      if (s >= 80) return 'score-green';
+      if (s >= 60) return 'score-yellow';
+      return 'score-red';
+    }
+
+    function barColor(v) {
+      if (v >= 80) return 'var(--green)';
+      if (v >= 60) return 'var(--yellow)';
+      return 'var(--red)';
+    }
+
+    // ── Profile ──
+    async function loadProfile() {
+      const el = document.getElementById('profileContent');
+      try {
+        const res = await fetch(`${API}/profile`, { headers: authHeaders() });
+        const data = await res.json();
+        if (!data.ok || !data.profile || !data.profile.structured_data) {
+          el.innerHTML = `<div class="empty-state"><div class="icon">📄</div><h3>No profile yet</h3><p>Upload a resume or document to build your profile automatically.</p><br><button class="btn" style="max-width:200px;margin:0 auto" onclick="switchTab('documents')">Upload Document</button></div>`;
+          return;
+        }
+        const p = data.profile.structured_data;
+        let html = '';
+        
+        if (p.summary) {
+          html += `<div class="card"><p style="font-size:1.05rem">${p.summary}</p></div>`;
+        }
+
+        // Skills
+        html += '<div class="card"><h3>Skills</h3>';
+        if (p.skills?.technical?.length) {
+          html += '<div class="profile-section"><h4>Technical</h4><div class="tags">' + p.skills.technical.map(s => `<span class="tag">${s}</span>`).join('') + '</div></div>';
+        }
+        if (p.skills?.soft?.length) {
+          html += '<div class="profile-section"><h4>Soft Skills</h4><div class="tags">' + p.skills.soft.map(s => `<span class="tag soft">${s}</span>`).join('') + '</div></div>';
+        }
+        html += '</div>';
+
+        // Experience
+        if (p.job_history?.length) {
+          html += '<div class="card"><h3>Experience' + (p.years_of_experience ? ` · ${p.years_of_experience} years` : '') + '</h3>';
+          for (const j of p.job_history) {
+            html += `<div class="job-history-item"><div class="title">${j.title}</div><div class="meta">${j.company}${j.duration ? ' · ' + j.duration : ''}${j.industry ? ' · ' + j.industry : ''}</div></div>`;
+          }
+          html += '</div>';
+        }
+
+        // Education
+        if (p.education?.length) {
+          html += '<div class="card"><h3>Education</h3>';
+          for (const e of p.education) {
+            html += `<div class="job-history-item"><div class="title">${e.degree}</div><div class="meta">${e.school}${e.year ? ' · ' + e.year : ''}</div></div>`;
+          }
+          html += '</div>';
+        }
+
+        // Certifications
+        if (p.certifications?.length) {
+          html += '<div class="card"><h3>Certifications</h3><div class="tags">' + p.certifications.map(c => `<span class="tag">${c}</span>`).join('') + '</div></div>';
+        }
+
+        // Industries
+        if (p.industries?.length) {
+          html += '<div class="card"><h3>Industries</h3><div class="tags">' + p.industries.map(i => `<span class="tag soft">${i}</span>`).join('') + '</div></div>';
+        }
+
+        html += `<button class="btn btn-secondary" style="max-width:220px;margin-top:12px" onclick="rebuildProfile()">🔄 Rebuild Profile</button>`;
+        el.innerHTML = html;
+      } catch (ex) {
+        el.innerHTML = `<div class="empty-state"><p>Failed to load profile. Please try again.</p></div>`;
+      }
+    }
+
+    async function rebuildProfile() {
+      const el = document.getElementById('profileContent');
+      el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Rebuilding profile with AI... this may take a moment.</div>';
+      try {
+        await fetch(`${API}/profile/rebuild`, { method: 'POST', headers: authHeaders() });
+        toast('Profile rebuilt!');
+        loadProfile();
+        loadMatches();
+      } catch (ex) {
+        toast('Rebuild failed', 'error');
+        loadProfile();
+      }
+    }
+
+    // ── Documents ──
+    async function loadDocuments() {
+      const el = document.getElementById('docList');
+      try {
+        const res = await fetch(`${API}/documents`, { headers: authHeaders() });
+        const data = await res.json();
+        if (!data.ok || !data.documents?.length) {
+          el.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:16px">No documents uploaded yet.</p>';
+          return;
+        }
+        el.innerHTML = '<ul class="doc-list">' + data.documents.map(d => 
+          `<li class="doc-item"><span class="name">📄 ${d.filename}</span><span class="date">${new Date(d.uploaded_at).toLocaleDateString()}</span></li>`
+        ).join('') + '</ul>';
+      } catch (ex) {
+        el.innerHTML = '<p style="color:var(--red)">Failed to load documents.</p>';
+      }
+    }
+
+    // Drag & drop
+    const dropZone = document.getElementById('dropZone');
+    dropZone?.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone?.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
+
+    async function uploadFile(file) {
+      if (!file) return;
+      toast('Uploading ' + file.name + '...');
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const res = await fetch(`${API}/documents/upload`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: fd
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        toast('Document uploaded & profile updated!');
+        loadDocuments();
+        loadProfile();
+        setTimeout(loadMatches, 2000);
+      } catch (ex) {
+        toast('Upload failed: ' + ex.message, 'error');
+      }
+    }
+
+    // ── Matches ──
+    async function loadMatches() {
+      const el = document.getElementById('matchesContent');
+      try {
+        const res = await fetch(`${API}/matches`, { headers: authHeaders() });
+        const data = await res.json();
+        if (!data.ok || !data.matches?.length) {
+          el.innerHTML = '<div class="empty-state"><div class="icon">🎯</div><h3>No matches yet</h3><p>Upload your resume and we\'ll match you with jobs. Make sure jobs are seeded.</p></div>';
+          return;
+        }
+        el.innerHTML = data.matches.map((m, i) => {
+          const b = m.breakdown || {};
+          return `
+            <div class="match-card" onclick="this.querySelector('.match-detail').classList.toggle('open')">
+              <div class="match-header">
+                <div class="match-info">
+                  <h3>${m.job.title}</h3>
+                  <div class="company">${m.job.company}</div>
+                  <div class="location">${m.job.location}</div>
+                  ${m.job.salary_min ? `<div class="salary">${formatSalary(m.job.salary_min)} – ${formatSalary(m.job.salary_max)}</div>` : ''}
+                </div>
+                <div class="score-badge ${scoreClass(m.score)}">${m.score}%</div>
+              </div>
+              <div class="match-detail">
+                ${b.summary ? `<p style="margin-bottom:16px;color:var(--text-muted)">${b.summary}</p>` : ''}
+                ${breakdownBar('Skills', b.skills_match)}
+                ${breakdownBar('Experience', b.experience_match)}
+                ${breakdownBar('Industry', b.industry_match)}
+                ${breakdownBar('Education', b.education_match)}
+                ${b.strengths?.length ? `<div style="margin-top:12px"><strong style="font-size:.85rem">Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.strengths.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
+                ${b.gaps?.length ? `<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.gaps.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
+                ${m.job.url ? `<a href="${m.job.url}" target="_blank" style="display:inline-block;margin-top:12px;color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
+              </div>
+            </div>`;
+        }).join('');
+      } catch (ex) {
+        el.innerHTML = '<div class="empty-state"><p>Failed to load matches.</p></div>';
+      }
+    }
+
+    function breakdownBar(label, val) {
+      if (val == null) return '';
+      const v = Math.max(0, Math.min(100, val));
+      return `<div class="breakdown-bar"><span class="breakdown-label">${label}</span><div class="breakdown-track"><div class="breakdown-fill" style="width:${v}%;background:${barColor(v)}"></div></div><span class="breakdown-val">${v}%</span></div>`;
+    }
+
+    // ── Settings ──
+    async function loadSettings() {
+      try {
+        const res = await fetch(`${API}/settings`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.ok && data.settings) {
+          document.getElementById('settGeo').value = data.settings.geography || '';
+          document.getElementById('settSalMin').value = data.settings.salary_min || '';
+          document.getElementById('settSalMax').value = data.settings.salary_max || '';
+          document.getElementById('settIndustries').value = (data.settings.industries || []).join(', ');
+        }
+      } catch (ex) {}
+    }
+
+    async function saveSettings(e) {
+      e.preventDefault();
+      try {
+        const body = {
+          geography: document.getElementById('settGeo').value,
+          salary_min: parseInt(document.getElementById('settSalMin').value) || 0,
+          salary_max: parseInt(document.getElementById('settSalMax').value) || 0,
+          industries: document.getElementById('settIndustries').value.split(',').map(s => s.trim()).filter(Boolean)
+        };
+        await fetch(`${API}/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(body) });
+        toast('Settings saved!');
+      } catch (ex) {
+        toast('Failed to save', 'error');
+      }
+    }
+  </script>
+</body>
+</html>

@@ -292,7 +292,7 @@
   <div class="container">
     <nav>
       <div class="logo">candid<span>8</span></div>
-      <div class="badge">Coming Soon</div>
+      <a href="/app.html" class="badge" style="text-decoration:none">Try the Beta →</a>
     </nav>
     
     <section class="hero">
@@ -399,7 +399,7 @@
   <script>
     async function submitWaitlist(email, msgEl) {
       try {
-        const res = await fetch('/api/waitlist', {
+        const res = await fetch('https://candid8-api.belk714.workers.dev/api/waitlist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email })
@@ -421,7 +421,7 @@
     
     async function updateCount() {
       try {
-        const res = await fetch('/api/waitlist/count');
+        const res = await fetch('https://candid8-api.belk714.workers.dev/api/waitlist/count');
         const data = await res.json();
         const el = document.getElementById('waitlistCount');
         if (data.count > 0) {
