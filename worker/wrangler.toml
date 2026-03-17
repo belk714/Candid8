@@ -2,9 +2,18 @@ name = "candid8-api"
 main = "index.js"
 compatibility_date = "2024-01-01"
 
+routes = [
+  { pattern = "candid8.fit/api/*", zone_id = "ce2026529be6e3b2b85d252f72238f1c" }
+]
+
 [[kv_namespaces]]
 binding = "WAITLIST"
-id = "" # Will be filled after KV namespace creation
+id = "2199a7981fb44c8baddb31150cc052c5"
 
-[routes]
-pattern = "candid8.fit/api/*"
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "39ff986c28f14f899ff8ce465085271c"
+
+[[kv_namespaces]]
+binding = "DATA"
+id = "eb8cbce9232341bf99e41446e344d82e"

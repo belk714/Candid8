@@ -74,7 +74,9 @@
     .doc-list { list-style: none; }
     .doc-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--surface2); border-radius: 10px; margin-bottom: 8px; }
     .doc-item .name { font-weight: 500; }
-    .doc-item .date { font-size: .8rem; color: var(--text-muted); }
+    .doc-item .date { font-size: .8rem; color: var(--text-muted); margin-right: 8px; }
+    .btn-delete { background: none; border: none; cursor: pointer; font-size: 1rem; opacity: 0.5; transition: opacity .2s; padding: 4px 8px; }
+    .btn-delete:hover { opacity: 1; }
 
     /* Matches */
     .match-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 12px; cursor: pointer; transition: all .15s; }
@@ -343,7 +345,7 @@
         const res = await fetch(`${API}/profile`, { headers: authHeaders() });
         const data = await res.json();
         if (!data.ok || !data.profile || !data.profile.structured_data) {
-          el.innerHTML = `<div class="empty-state"><div class="icon">📄</div><h3>No profile yet</h3><p>Upload a resume or document to build your profile automatically.</p><br><button class="btn" style="max-width:200px;margin:0 auto" onclick="switchTab('documents')">Upload Document</button></div>`;
+          el.innerHTML = `<div class="empty-state"><div class="icon">📄</div><h3>No profile yet</h3><p>Upload a resume or document to build your profile automatically.</p><br><button class="btn" style="max-width:200px;margin:0 auto" onclick="switchTab('documents')">Upload Document</button><br><br><button class="btn btn-secondary" style="max-width:220px;margin:0 auto" onclick="rebuildProfile()">🔄 Rebuild Profile</button><p style="font-size:0.8rem;color:var(--text-muted);margin-top:8px">If you already uploaded a doc, click rebuild to re-parse it.</p></div>`;
           return;
         }
         const p = data.profile.structured_data;
@@ -423,10 +425,25 @@
           return;
         }
         el.innerHTML = '<ul class="doc-list">' + data.documents.map(d => 
-          `<li class="doc-item"><span class="name">📄 ${d.filename}</span><span class="date">${new Date(d.uploaded_at).toLocaleDateString()}</span></li>`
+          `<li class="doc-item"><span class="name">📄 ${d.filename}</span><span class="date">${new Date(d.uploaded_at).toLocaleDateString()}</span><button class="btn-delete" onclick="deleteDoc('${d.id}','${d.filename}')" title="Delete">🗑️</button></li>`
         ).join('') + '</ul>';
       } catch (ex) {
         el.innerHTML = '<p style="color:var(--red)">Failed to load documents.</p>';
+      }
+    }
+
+    async function deleteDoc(id, filename) {
+      if (!confirm(`Delete "${filename}"?`)) return;
+      try {
+        const res = await fetch(`${API}/documents/${id}`, { method: 'DELETE', headers: authHeaders() });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        toast('Document deleted');
+        loadDocuments();
+        setTimeout(loadProfile, 500);
+        setTimeout(loadMatches, 1000);
+      } catch (ex) {
+        toast('Delete failed: ' + ex.message, 'error');
       }
     }
 
@@ -451,8 +468,9 @@
         if (!data.ok) throw new Error(data.error);
         toast('Document uploaded & profile updated!');
         loadDocuments();
-        loadProfile();
-        setTimeout(loadMatches, 2000);
+        // Give the profile rebuild a moment
+        setTimeout(() => { loadProfile(); }, 1000);
+        setTimeout(loadMatches, 3000);
       } catch (ex) {
         toast('Upload failed: ' + ex.message, 'error');
       }

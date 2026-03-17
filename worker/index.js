@@ -1,3 +1,5 @@
+import { extractText as unpdfExtractText } from 'unpdf';
+
 /**
  * Candid8 API Worker
  * 
@@ -82,6 +84,10 @@ async function route(url, request, env, cors) {
   // Documents
   if (path === '/api/documents/upload' && method === 'POST') return handleDocUpload(request, env, cors);
   if (path === '/api/documents' && method === 'GET') return handleDocList(request, env, cors);
+  if (path.startsWith('/api/documents/') && method === 'DELETE') {
+    const docId = path.split('/api/documents/')[1];
+    return handleDocDelete(docId, request, env, cors);
+  }
 
   // Profile
   if (path === '/api/profile' && method === 'GET') return handleGetProfile(request, env, cors);
@@ -100,6 +106,9 @@ async function route(url, request, env, cors) {
 
   // Admin: seed jobs
   if (path === '/api/admin/seed-jobs' && method === 'POST') return handleSeedJobs(env, cors);
+
+  // Admin: sync Adzuna jobs
+  if (path === '/api/admin/sync-jobs' && method === 'POST') return handleSyncAdzunaJobs(request, env, cors);
 
   return new Response('Not found', { status: 404, headers: cors });
 }
@@ -188,7 +197,14 @@ async function handleDocUpload(request, env, cors) {
 
   const filename = file.name;
   const arrayBuf = await file.arrayBuffer();
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+  // Convert to base64 in chunks to avoid max call stack size
+  const bytes = new Uint8Array(arrayBuf);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+  }
+  const base64 = btoa(binary);
 
   // Use OpenAI to extract text from the document
   let rawText = '';
@@ -208,15 +224,16 @@ async function handleDocUpload(request, env, cors) {
   docs.push(docId);
   await env.DATA.put(`user_docs:${userId}`, JSON.stringify(docs));
 
-  // Trigger profile rebuild in background
+  // Trigger profile rebuild
+  let profileError = null;
   try {
     await rebuildProfile(userId, env);
   } catch (e) {
-    // Non-fatal — profile rebuild can be retried
+    profileError = e.message;
     console.error('Profile rebuild failed:', e);
   }
 
-  return Response.json({ ok: true, document: { id: docId, filename, uploaded_at: doc.uploaded_at } }, { headers: cors });
+  return Response.json({ ok: true, document: { id: docId, filename, uploaded_at: doc.uploaded_at }, profileError }, { headers: cors });
 }
 
 async function handleDocList(request, env, cors) {
@@ -230,6 +247,35 @@ async function handleDocList(request, env, cors) {
     if (d) docs.push({ id: d.id, filename: d.filename, uploaded_at: d.uploaded_at });
   }
   return Response.json({ ok: true, documents: docs }, { headers: cors });
+}
+
+async function handleDocDelete(docId, request, env, cors) {
+  const userId = await requireAuth(request, env);
+  
+  // Verify doc belongs to user
+  const doc = JSON.parse(await env.DATA.get(`doc:${docId}`) || 'null');
+  if (!doc || doc.user_id !== userId) {
+    return Response.json({ ok: false, error: 'Document not found' }, { headers: cors, status: 404 });
+  }
+
+  // Remove from KV
+  await env.DATA.delete(`doc:${docId}`);
+
+  // Remove from user's doc list
+  const docsJson = await env.DATA.get(`user_docs:${userId}`) || '[]';
+  const docIds = JSON.parse(docsJson).filter(id => id !== docId);
+  await env.DATA.put(`user_docs:${userId}`, JSON.stringify(docIds));
+
+  // Rebuild profile with remaining docs
+  try {
+    await rebuildProfile(userId, env);
+  } catch (e) {
+    // If no docs left, clear profile
+    await env.DATA.delete(`profile:${userId}`);
+    await env.DATA.delete(`user_matches:${userId}`);
+  }
+
+  return Response.json({ ok: true }, { headers: cors });
 }
 
 // ── Profile ──────────────────────────────────────────────────────────────────
@@ -254,10 +300,10 @@ async function rebuildProfile(userId, env) {
   let allText = '';
   for (const id of docIds) {
     const d = JSON.parse(await env.DATA.get(`doc:${id}`) || 'null');
-    if (d && d.raw_text) allText += d.raw_text + '\n\n';
+    if (d && d.raw_text && !d.raw_text.startsWith('Failed to extract text')) allText += d.raw_text + '\n\n';
   }
 
-  if (!allText.trim()) return null;
+  if (!allText.trim()) throw new Error('No valid document text found. All docs may have failed extraction.');
 
   // Parse with OpenAI
   const structured = await parseResumeWithOpenAI(env, allText);
@@ -448,30 +494,45 @@ async function handleSeedJobs(env, cors) {
 
 // ── OpenAI Integration ───────────────────────────────────────────────────────
 
+// Lightweight PDF text extractor — pulls text from PDF stream objects
+async function extractTextFromPDF(bytes) {
+  const result = await unpdfExtractText(new Uint8Array(bytes));
+  // result.text is an array of strings (one per page)
+  const text = Array.isArray(result.text) ? result.text.join('\n\n') : String(result.text);
+  return text.trim();
+}
+
 async function extractTextWithOpenAI(env, base64Content, filename) {
   const ext = filename.toLowerCase().split('.').pop();
   
-  // For PDFs, use vision; for text-like formats, decode directly
   if (ext === 'pdf') {
-    // Use GPT-4o-mini vision to extract text from PDF
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Extract ALL text from this document. Return only the raw text content, preserving structure. Do not summarize.' },
-            { type: 'image_url', image_url: { url: `data:application/pdf;base64,${base64Content}` } }
-          ]
-        }],
-        max_tokens: 4000
-      })
-    });
-    const data = await res.json();
-    if (data.choices && data.choices[0]) return data.choices[0].message.content;
-    throw new Error('OpenAI extraction failed');
+    // Extract text directly from PDF binary
+    const bytes = Uint8Array.from(atob(base64Content), c => c.charCodeAt(0));
+    let rawText = await extractTextFromPDF(bytes);
+    
+    // If we got decent text, optionally clean it up with GPT
+    if (rawText.length > 50) {
+      try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: `Clean up and organize this extracted resume text. Return only the clean text, preserving all information:\n\n${rawText.substring(0, 10000)}` }],
+            max_tokens: 4000
+          })
+        });
+        const data = await res.json();
+        if (data.choices && data.choices[0]) return data.choices[0].message.content;
+      } catch (e) {
+        // Fall through to raw text
+      }
+      return rawText;
+    }
+    
+    // If PDF text extraction got very little, return what we have
+    if (rawText.length > 0) return rawText;
+    throw new Error('Could not extract text from PDF — it may be image-based. Try uploading a .docx or .txt version.');
   } else {
     // For DOCX and other text formats, try to decode as text
     try {
@@ -526,10 +587,13 @@ async function parseResumeWithOpenAI(env, text) {
     })
   });
   const data = await res.json();
+  if (data.error) {
+    throw new Error('OpenAI error: ' + (data.error.message || JSON.stringify(data.error)));
+  }
   if (data.choices && data.choices[0]) {
     return JSON.parse(data.choices[0].message.content);
   }
-  throw new Error('Failed to parse resume');
+  throw new Error('Failed to parse resume: no choices returned');
 }
 
 async function getEmbedding(env, text) {
@@ -544,4 +608,112 @@ async function getEmbedding(env, text) {
   const data = await res.json();
   if (data.data && data.data[0]) return data.data[0].embedding;
   throw new Error('Embedding failed');
+}
+
+// ── Adzuna Job Sync ──────────────────────────────────────────────────────────
+
+const ADZUNA_APP_ID = 'fadb3c67';
+const ADZUNA_APP_KEY = '640323793fe920a505d836b4088a0201';
+
+async function handleSyncAdzunaJobs(request, env, cors) {
+  // Accept optional search queries and location in body
+  let queries = ['energy strategy manager', 'oil gas transformation', 'management consulting energy', 'digital transformation oil gas', 'operating model consultant'];
+  let location = 'Texas';
+  let perQuery = 10;
+  
+  try {
+    const body = await request.json();
+    if (body.queries) queries = body.queries;
+    if (body.location) location = body.location;
+    if (body.per_query) perQuery = body.per_query;
+  } catch (e) { /* use defaults */ }
+
+  const seenIds = new Set();
+  const allJobs = [];
+
+  for (const query of queries) {
+    try {
+      const params = new URLSearchParams({
+        app_id: ADZUNA_APP_ID,
+        app_key: ADZUNA_APP_KEY,
+        results_per_page: String(perQuery),
+        what: query,
+        where: location,
+        'content-type': 'application/json',
+        sort_by: 'relevance'
+      });
+      const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
+      const data = await res.json();
+      
+      if (data.results) {
+        for (const r of data.results) {
+          if (seenIds.has(r.id)) continue;
+          seenIds.add(r.id);
+          allJobs.push({
+            adzuna_id: String(r.id),
+            title: r.title || '',
+            company: r.company?.display_name || 'Unknown',
+            location: r.location?.display_name || '',
+            description: r.description || '',
+            salary_min: r.salary_min || null,
+            salary_max: r.salary_max || null,
+            url: r.redirect_url || '',
+            category: r.category?.label || '',
+            created: r.created || new Date().toISOString()
+          });
+        }
+      }
+    } catch (e) {
+      console.error(`Adzuna query "${query}" failed:`, e.message);
+    }
+  }
+
+  // Clear old jobs and index
+  const oldIndexJson = await env.DATA.get('jobs_index') || '[]';
+  const oldIds = JSON.parse(oldIndexJson);
+  for (const oldId of oldIds) {
+    await env.DATA.delete(`job:${oldId}`);
+  }
+
+  // Store new jobs with embeddings
+  const jobIds = [];
+  let embedded = 0;
+  
+  for (const j of allJobs) {
+    const id = uuid();
+    let embedding = null;
+    try {
+      embedding = await getEmbedding(env, `${j.title} at ${j.company}. ${j.location}. ${j.category}. ${j.description}`);
+      embedded++;
+    } catch (e) {
+      console.error('Embedding failed for:', j.title, e.message);
+    }
+
+    const job = {
+      id,
+      adzuna_id: j.adzuna_id,
+      title: j.title,
+      company: j.company,
+      location: j.location,
+      description: j.description,
+      salary_min: j.salary_min,
+      salary_max: j.salary_max,
+      url: j.url,
+      category: j.category,
+      source: 'adzuna',
+      embedding: embedding ? JSON.stringify(embedding) : null,
+      created_at: j.created
+    };
+    await env.DATA.put(`job:${id}`, JSON.stringify(job));
+    jobIds.push(id);
+  }
+
+  await env.DATA.put('jobs_index', JSON.stringify(jobIds));
+
+  return Response.json({
+    ok: true,
+    jobs_synced: jobIds.length,
+    jobs_embedded: embedded,
+    queries_used: queries.length
+  }, { headers: cors });
 }
