@@ -36258,11 +36258,17 @@ async function handleGetMatches(request, env, cors) {
     matches.push({
       id: m2.id,
       score: m2.score,
+      cosine_pct: m2.cosine_pct || 0,
       breakdown: JSON.parse(m2.breakdown || "{}"),
       job: { id: job.id, title: job.title, company: job.company, location: job.location, salary_min: job.salary_min, salary_max: job.salary_max, url: job.url }
     });
   }
-  matches.sort((a2, b2) => b2.score - a2.score);
+  matches.sort((a2, b2) => {
+    const aScore = a2.score ?? -1;
+    const bScore = b2.score ?? -1;
+    if (aScore !== bScore) return bScore - aScore;
+    return (b2.cosine_pct || 0) - (a2.cosine_pct || 0);
+  });
   return Response.json({ ok: true, matches }, { headers: cors });
 }
 async function handleGetMatchDetail(request, env, cors, jobId) {

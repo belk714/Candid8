@@ -853,7 +853,7 @@
                 </div>
                 ${hasScore 
                   ? `<div class="score-badge ${scoreClass(m.score)}" id="badge-${m.job.id}" title="AI-analyzed fit score">${scoreLabel}</div>`
-                  : `<div class="score-badge" id="badge-${m.job.id}" style="background:var(--surface2);color:var(--text-muted);font-size:.7rem;cursor:pointer" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')" title="Click to analyze fit">Analyze</div>`
+                  : `<div class="score-badge" id="badge-${m.job.id}" style="background:var(--surface2);color:var(--text-muted);font-size:.7rem;cursor:pointer" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')" title="Rough similarity: ${m.cosine_pct || '?'}% — click to analyze">Analyze</div>`
                 }
               </div>
               ${b.matched_skills?.length ? `<div class="tags" style="margin-top:8px">${b.matched_skills.map(s=>`<span class="tag" style="font-size:.75rem">${s}</span>`).join('')}</div>` : ''}

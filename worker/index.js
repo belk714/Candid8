@@ -1190,12 +1190,19 @@ async function handleGetMatches(request, env, cors) {
     matches.push({
       id: m.id,
       score: m.score,
+      cosine_pct: m.cosine_pct || 0,
       breakdown: JSON.parse(m.breakdown || '{}'),
       job: { id: job.id, title: job.title, company: job.company, location: job.location, salary_min: job.salary_min, salary_max: job.salary_max, url: job.url }
     });
   }
   
-  matches.sort((a, b) => b.score - a.score);
+  // Sort by GPT score first (if analyzed), then by cosine similarity
+  matches.sort((a, b) => {
+    const aScore = a.score ?? -1;
+    const bScore = b.score ?? -1;
+    if (aScore !== bScore) return bScore - aScore;
+    return (b.cosine_pct || 0) - (a.cosine_pct || 0);
+  });
   return Response.json({ ok: true, matches }, { headers: cors });
 }
 
