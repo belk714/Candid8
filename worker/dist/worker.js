@@ -35466,7 +35466,7 @@ var index_default = {
       const newJobIds = [];
       for (const j2 of allJobs) {
         const id = uuid();
-        const embedText = `${j2.title} at ${j2.company}. ${j2.location}. ${j2.category}. ${j2.description}`;
+        const embedText = `Job Title: ${j2.title}. Job Title: ${j2.title}. Company: ${j2.company}. Location: ${j2.location}. Industry: ${j2.category}. ${(j2.description || "").substring(0, 400)}`;
         let embedding = null;
         try {
           embedding = await getEmbedding(env, embedText);
@@ -35629,7 +35629,7 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
         const jobEmb = JSON.parse(job.embedding);
         const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
         const cosinePct = Math.round(cosineScore * 100);
-        if (cosinePct < 30) continue;
+        if (cosinePct < 40) continue;
         if (!job.structured_requirements) {
           try {
             const descText = job.full_description || job.description || "";
@@ -36332,7 +36332,7 @@ async function computeMatches(userId, env, profile) {
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);
-    if (cosinePct < 30) continue;
+    if (cosinePct < 40) continue;
     const matchId = uuid();
     const match = {
       id: matchId,
@@ -36638,7 +36638,7 @@ async function handleJobSearch(request, env, cors) {
     };
     if (profile && profile.embedding) {
       try {
-        const embedText = `${item.title} at ${item.company}. ${r2.description || ""}`;
+        const embedText = `Job Title: ${item.title}. Job Title: ${item.title}. Company: ${item.company}. Location: ${item.location}. ${(r2.description || "").substring(0, 400)}`;
         const jobEmb = await getEmbedding(env, embedText);
         const cosine = cosineSimilarity(profile.embedding, jobEmb);
         item.fit_score = Math.round(cosine * 100);
@@ -37154,7 +37154,7 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     const id = uuid();
     let embedding = null;
     try {
-      const embText = `${j2.title} at ${j2.company}. ${j2.location}. ${j2.category}. ${j2.description}`;
+      const embText = `Job Title: ${j2.title}. Job Title: ${j2.title}. Company: ${j2.company}. Location: ${j2.location}. Industry: ${j2.category}. ${(j2.description || "").substring(0, 400)}`;
       embedding = await getEmbedding(env, embText);
       embedded++;
     } catch (e2) {
@@ -37455,7 +37455,7 @@ async function handleReembedAll(url, env, cors) {
           }
         }
       }
-      const embText = sr2 ? buildNormalizedEmbeddingText("job", sr2) : `${job.title} at ${job.company}. ${job.description || ""}`;
+      const embText = sr2 ? buildNormalizedEmbeddingText("job", sr2) : `Job Title: ${job.title}. Job Title: ${job.title}. Company: ${job.company}. Location: ${job.location || ""}. Industry: ${job.category || ""}. ${(job.description || "").substring(0, 400)}`;
       const embedding = await getEmbedding(env, embText);
       job.embedding = JSON.stringify(embedding);
       await env.DATA.put(`job:${jobId}`, JSON.stringify(job));

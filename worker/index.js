@@ -167,9 +167,9 @@ export default {
       const newJobIds = [];
       for (const j of allJobs) {
         const id = uuid();
-        const embedText = `${j.title} at ${j.company}. ${j.location}. ${j.category}. ${j.description}`;
+        const embedText = `Job Title: ${j.title}. Job Title: ${j.title}. Company: ${j.company}. Location: ${j.location}. Industry: ${j.category}. ${(j.description || '').substring(0, 400)}`;
         
-        // Embed using Adzuna description (scraping happens lazily on detail view)
+        // Embed using title-weighted text (title repeated for emphasis)
         let embedding = null;
         try {
           embedding = await getEmbedding(env, embedText);
@@ -375,7 +375,7 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
         const jobEmb = JSON.parse(job.embedding);
         const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
         const cosinePct = Math.round(cosineScore * 100);
-        if (cosinePct < 30) continue;
+        if (cosinePct < 40) continue;
 
         // Lazy parse structured requirements if missing
         if (!job.structured_requirements) {
@@ -1280,7 +1280,7 @@ async function computeMatches(userId, env, profile) {
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);
-    if (cosinePct < 30) continue;
+    if (cosinePct < 40) continue;
 
     // 3. Store as a candidate match (no score yet — user clicks "Analyze Fit" or alert engine scores it)
     const matchId = uuid();
@@ -1715,7 +1715,7 @@ async function handleJobSearch(request, env, cors) {
 
     if (profile && profile.embedding) {
       try {
-        const embedText = `${item.title} at ${item.company}. ${r.description || ''}`;
+        const embedText = `Job Title: ${item.title}. Job Title: ${item.title}. Company: ${item.company}. Location: ${item.location}. ${(r.description || '').substring(0, 400)}`;
         const jobEmb = await getEmbedding(env, embedText);
         const cosine = cosineSimilarity(profile.embedding, jobEmb);
         item.fit_score = Math.round(cosine * 100);
@@ -2351,7 +2351,7 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     // Quick embedding from title + company + Adzuna snippet
     let embedding = null;
     try {
-      const embText = `${j.title} at ${j.company}. ${j.location}. ${j.category}. ${j.description}`;
+      const embText = `Job Title: ${j.title}. Job Title: ${j.title}. Company: ${j.company}. Location: ${j.location}. Industry: ${j.category}. ${(j.description || '').substring(0, 400)}`;
       embedding = await getEmbedding(env, embText);
       embedded++;
     } catch (e) {
@@ -2705,7 +2705,7 @@ async function handleReembedAll(url, env, cors) {
 
       const embText = sr
         ? buildNormalizedEmbeddingText('job', sr)
-        : `${job.title} at ${job.company}. ${job.description || ''}`;
+        : `Job Title: ${job.title}. Job Title: ${job.title}. Company: ${job.company}. Location: ${job.location || ''}. Industry: ${job.category || ''}. ${(job.description || '').substring(0, 400)}`;
       const embedding = await getEmbedding(env, embText);
       job.embedding = JSON.stringify(embedding);
       await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
