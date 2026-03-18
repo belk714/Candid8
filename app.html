@@ -157,7 +157,7 @@
     .onboarding-step { display: none; animation: fadeIn .3s ease; }
     .onboarding-step.active { display: block; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes progressBar { 0% { width: 0%; } 50% { width: 60%; } 80% { width: 85%; } 100% { width: 95%; } }
+    @keyframes progressBar { 0% { width: 0%; } 20% { width: 15%; } 40% { width: 35%; } 60% { width: 55%; } 80% { width: 75%; } 95% { width: 90%; } 100% { width: 95%; } }
     .onboarding-step h2 { font-size: 1.6rem; font-weight: 700; margin-bottom: 12px; }
     .onboarding-step p.sub { color: var(--text-muted); margin-bottom: 28px; font-size: .95rem; }
     .ob-drop-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 40px 20px; cursor: pointer; transition: all .2s; margin-bottom: 20px; }
@@ -258,7 +258,9 @@
         <input type="file" id="obFileInput" accept=".pdf,.docx,.doc,.txt" style="display:none">
         <div class="ob-loading" id="obLoading">
           <div class="spinner"></div>
-          <p>Analyzing your resume... This takes about 30 seconds</p>
+          <p class="ob-upload-status" style="font-weight:500">Reading document...</p>
+          <p style="font-size:.85rem;color:var(--text-muted);margin-top:4px">Building your career profile</p>
+          <div style="margin:16px auto;width:80%;max-width:300px;height:4px;background:var(--border);border-radius:4px;overflow:hidden"><div class="ob-progress-fill" style="height:100%;width:0%;background:var(--accent);border-radius:4px;animation:progressBar 45s ease-out forwards"></div></div>
         </div>
         <div class="ob-summary" id="obSummary"></div>
         <button class="btn" id="obResumeNext" disabled onclick="obNext()">Continue</button>
@@ -802,16 +804,26 @@
       const fd = new FormData();
       fd.append('file', file);
       try {
-        // Show analyzing state after a moment
+        // Show stepped progress messages
+        const stepMsg = (msg) => {
+          const statusEl = dropZoneEl.querySelector('.upload-status');
+          if (statusEl) statusEl.textContent = msg;
+        };
         const analyzeTimer = setTimeout(() => {
-          dropZoneEl.innerHTML = '<div class="spinner" style="margin:0 auto 12px"></div><p style="color:var(--text-muted)">Analyzing your resume...</p><p style="font-size:.8rem;color:var(--text-muted)">Extracting skills, experience & building your profile (~30s)</p><div style="margin:16px auto;width:80%;height:4px;background:var(--border);border-radius:4px;overflow:hidden"><div style="height:100%;width:0%;background:var(--accent);border-radius:4px;animation:progressBar 30s ease-out forwards"></div></div>';
-        }, 2000);
+          dropZoneEl.innerHTML = '<div class="spinner" style="margin:0 auto 12px"></div><p class="upload-status" style="color:var(--text-muted);font-weight:500">Reading document...</p><p style="font-size:.8rem;color:var(--text-muted);margin-top:4px">Building your career profile</p><div style="margin:16px auto;width:80%;height:4px;background:var(--border);border-radius:4px;overflow:hidden"><div style="height:100%;width:0%;background:var(--accent);border-radius:4px;animation:progressBar 45s ease-out forwards"></div></div>';
+        }, 1500);
+        const step2 = setTimeout(() => stepMsg('Extracting work history...'), 6000);
+        const step3 = setTimeout(() => stepMsg('Identifying skills & expertise...'), 12000);
+        const step4 = setTimeout(() => stepMsg('Mapping education & certifications...'), 18000);
+        const step5 = setTimeout(() => stepMsg('Categorizing skill taxonomy...'), 24000);
+        const step6 = setTimeout(() => stepMsg('Building career profile...'), 32000);
+        const step7 = setTimeout(() => stepMsg('Almost there...'), 40000);
         const res = await fetch(`${API}/documents/upload`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` },
           body: fd
         });
-        clearTimeout(analyzeTimer);
+        [analyzeTimer,step2,step3,step4,step5,step6,step7].forEach(clearTimeout);
         const data = await res.json();
         if (!data.ok) throw new Error(data.error);
         dropZoneEl.innerHTML = '<div style="font-size:2rem;margin-bottom:8px">✅</div><p style="color:var(--green);font-weight:600">Profile updated!</p>';
@@ -1245,11 +1257,20 @@
       const fd = new FormData();
       fd.append('file', file);
       try {
+        const obStatus = document.querySelector('.ob-upload-status');
+        const obStep = (msg) => { if (obStatus) obStatus.textContent = msg; };
+        const os2 = setTimeout(() => obStep('Extracting work history...'), 5000);
+        const os3 = setTimeout(() => obStep('Identifying skills & expertise...'), 11000);
+        const os4 = setTimeout(() => obStep('Mapping education & certifications...'), 17000);
+        const os5 = setTimeout(() => obStep('Categorizing skill taxonomy...'), 23000);
+        const os6 = setTimeout(() => obStep('Building career profile...'), 31000);
+        const os7 = setTimeout(() => obStep('Almost there...'), 39000);
         const res = await fetch(`${API}/documents/upload`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` },
           body: fd
         });
+        [os2,os3,os4,os5,os6,os7].forEach(clearTimeout);
         const data = await res.json();
         if (!data.ok) throw new Error(data.error);
 

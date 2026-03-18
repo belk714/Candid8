@@ -545,6 +545,18 @@ async function route(url, request, env, cors) {
   if (path === '/api/admin/alerts' && method === 'GET') return handleAdminAlerts(url, env, cors);
   if (path === '/api/admin/stats' && method === 'GET') return handleAdminStats(url, env, cors);
   if (path === '/api/admin/profile' && method === 'GET') return handleAdminGetProfile(url, env, cors);
+  if (path === '/api/admin/docs' && method === 'GET') {
+    requirePin(url);
+    const userId = url.searchParams.get('user_id');
+    const docsJson = await env.DATA.get(`user_docs:${userId}`) || '[]';
+    const docIds = JSON.parse(docsJson);
+    const docs = [];
+    for (const id of docIds) {
+      const d = JSON.parse(await env.DATA.get(`doc:${id}`) || 'null');
+      if (d) docs.push({ id: d.id, filename: d.filename, raw_text: d.raw_text?.substring(0, 3000), uploaded_at: d.uploaded_at });
+    }
+    return Response.json({ ok: true, docs }, { headers: cors });
+  }
   if (path === '/api/admin/profile' && method === 'PATCH') return handleAdminPatchProfile(url, request, env, cors);
   if (path === '/api/admin/invite' && method === 'POST') return handleAdminInvite(url, request, env, cors);
 
