@@ -441,6 +441,21 @@ async function route(url, request, env, cors) {
   // Admin: re-embed all jobs with normalized format
   if (path === '/api/admin/reembed-all' && method === 'POST') return handleReembedAll(env, cors);
 
+  // Admin panel endpoints (PIN auth)
+  if (path === '/api/admin/dashboard' && method === 'GET') return handleAdminDashboard(url, env, cors);
+  if (path === '/api/admin/users' && method === 'GET') return handleAdminUsers(url, env, cors);
+  if (path.match(/^\/api\/admin\/users\/[^/]+\/approve$/) && method === 'POST') {
+    const userId = path.split('/api/admin/users/')[1].replace('/approve', '');
+    return handleAdminApprove(url, env, cors, userId);
+  }
+  if (path.match(/^\/api\/admin\/users\/[^/]+\/revoke$/) && method === 'POST') {
+    const userId = path.split('/api/admin/users/')[1].replace('/revoke', '');
+    return handleAdminRevoke(url, env, cors, userId);
+  }
+  if (path === '/api/admin/alerts' && method === 'GET') return handleAdminAlerts(url, env, cors);
+  if (path === '/api/admin/stats' && method === 'GET') return handleAdminStats(url, env, cors);
+  if (path === '/api/admin/invite' && method === 'POST') return handleAdminInvite(url, request, env, cors);
+
   return new Response('Not found', { status: 404, headers: cors });
 }
 
@@ -460,6 +475,27 @@ async function handleWaitlistAdd(request, env, cors) {
   const countStr = await env.WAITLIST.get('__count__') || '0';
   const count = parseInt(countStr, 10) + 1;
   await env.WAITLIST.put('__count__', String(count));
+
+  // Send waitlist confirmation email
+  const apiKey = env.RESEND_API_KEY || 're_XvHm7q1S_DFWNdNXF9VD8qUdqREVxWHcK';
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Candid8 <alerts@candid8.fit>',
+        to: normalized,
+        subject: "You're on the Candid8 waitlist!",
+        html: `<div style="font-family:-apple-system,sans-serif;max-width:500px;margin:0 auto;padding:32px;background:#18181b;color:#e4e4e7;border-radius:16px">
+          <h1 style="color:#6366f1;margin-bottom:16px">You're on the list! 🎯</h1>
+          <p>Thanks for signing up! You're #${count} on the waitlist.</p>
+          <p>We're onboarding users in batches and will email you when your account is ready.</p>
+          <p style="color:#71717a;font-size:14px;margin-top:24px">— The Candid8 Team</p>
+        </div>`
+      })
+    });
+  } catch(e) { console.error('Waitlist email failed:', e.message); }
+
   return Response.json({ ok: true, count }, { headers: cors });
 }
 
@@ -483,7 +519,7 @@ async function handleSignup(request, env, cors) {
 
   const id = uuid();
   const hash = await hashPassword(password);
-  const user = { id, email: normalized, password_hash: hash, created_at: new Date().toISOString() };
+  const user = { id, email: normalized, password_hash: hash, created_at: new Date().toISOString(), approved: false };
   
   await env.DATA.put(`user:${id}`, JSON.stringify(user));
   await env.DATA.put(`user_email:${normalized}`, id);
@@ -500,7 +536,7 @@ async function handleSignup(request, env, cors) {
   const token = uuid();
   await env.SESSIONS.put(token, id, { expirationTtl: 86400 * 7 }); // 7 days
 
-  return Response.json({ ok: true, token, user: { id, email: normalized } }, { headers: cors });
+  return Response.json({ ok: true, token, user: { id, email: normalized, approved: false } }, { headers: cors });
 }
 
 async function handleLogin(request, env, cors) {
@@ -519,9 +555,13 @@ async function handleLogin(request, env, cors) {
     return Response.json({ ok: false, error: 'Invalid credentials' }, { headers: cors, status: 401 });
   }
 
+  // Update last_login
+  user.last_login = new Date().toISOString();
+  await env.DATA.put(`user:${userId}`, JSON.stringify(user));
+
   const token = uuid();
   await env.SESSIONS.put(token, userId, { expirationTtl: 86400 * 7 });
-  return Response.json({ ok: true, token, user: { id: userId, email: normalized } }, { headers: cors });
+  return Response.json({ ok: true, token, user: { id: userId, email: normalized, approved: !!user.approved } }, { headers: cors });
 }
 
 // ── Documents ────────────────────────────────────────────────────────────────
@@ -2072,6 +2112,181 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     backfilled: backfilled,
     queries_used: queries.length
   }, { headers: cors });
+}
+
+// ── Admin: Re-embed all jobs with normalized format ──────────────────────────
+
+// ── Admin Panel Endpoints ────────────────────────────────────────────────────
+
+const ADMIN_PIN = '7714';
+
+function requirePin(url) {
+  const pin = url.searchParams.get('pin');
+  if (pin !== ADMIN_PIN) throw new Error('Unauthorized');
+}
+
+async function handleAdminDashboard(url, env, cors) {
+  requirePin(url);
+  const waitlistCount = parseInt(await env.WAITLIST.get('__count__') || '0', 10);
+  const usersIndex = JSON.parse(await env.DATA.get('users_index') || '[]');
+  const jobsIndex = JSON.parse(await env.DATA.get('jobs_index') || '[]');
+
+  let approvedCount = 0;
+  let totalAlerts = 0;
+  for (const uid of usersIndex) {
+    const user = JSON.parse(await env.DATA.get(`user:${uid}`) || '{}');
+    if (user.approved) approvedCount++;
+    const history = JSON.parse(await env.DATA.get(`user_alert_history:${uid}`) || '[]');
+    totalAlerts += history.length;
+  }
+
+  const lastSync = await env.DATA.get('last_sync_time');
+  const lastSyncResult = await env.DATA.get('last_sync_result');
+
+  return Response.json({
+    ok: true,
+    waitlist_count: waitlistCount,
+    total_users: usersIndex.length,
+    approved_users: approvedCount,
+    total_jobs: jobsIndex.length,
+    total_alerts: totalAlerts,
+    last_sync: lastSync || null,
+    last_sync_result: lastSyncResult || null
+  }, { headers: cors });
+}
+
+async function handleAdminUsers(url, env, cors) {
+  requirePin(url);
+  const usersIndex = JSON.parse(await env.DATA.get('users_index') || '[]');
+  const users = [];
+  for (const uid of usersIndex) {
+    const user = JSON.parse(await env.DATA.get(`user:${uid}`) || 'null');
+    if (!user) continue;
+    const settings = JSON.parse(await env.DATA.get(`user_settings:${uid}`) || '{}');
+    const profile = JSON.parse(await env.DATA.get(`profile:${uid}`) || 'null');
+    const docsJson = await env.DATA.get(`user_docs:${uid}`) || '[]';
+    const docs = JSON.parse(docsJson);
+    const skillCount = profile?.structured_data?.skills?.skill_count || profile?.structured_data?.skill_count || 0;
+    users.push({
+      id: user.id,
+      email: user.email,
+      created_at: user.created_at,
+      approved: !!user.approved,
+      last_login: user.last_login || null,
+      onboarding_complete: !!settings.onboarding_complete,
+      has_resume: docs.length > 0,
+      cities: (settings.locations || []).join(', '),
+      skill_count: skillCount,
+      search_count: settings.search_count || 0,
+      detail_analysis_count: settings.detail_analysis_count || 0
+    });
+  }
+  return Response.json({ ok: true, users }, { headers: cors });
+}
+
+async function handleAdminApprove(url, env, cors, userId) {
+  requirePin(url);
+  const user = JSON.parse(await env.DATA.get(`user:${userId}`) || 'null');
+  if (!user) return Response.json({ ok: false, error: 'User not found' }, { status: 404, headers: cors });
+  user.approved = true;
+  await env.DATA.put(`user:${userId}`, JSON.stringify(user));
+
+  // Send welcome email
+  const apiKey = env.RESEND_API_KEY || 're_XvHm7q1S_DFWNdNXF9VD8qUdqREVxWHcK';
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Candid8 <alerts@candid8.fit>',
+        to: user.email,
+        subject: "You're in! Welcome to Candid8 🎯",
+        html: `<div style="font-family:-apple-system,sans-serif;max-width:500px;margin:0 auto;padding:32px;background:#18181b;color:#e4e4e7;border-radius:16px">
+          <h1 style="color:#6366f1;margin-bottom:16px">Welcome to Candid8!</h1>
+          <p>Your account has been approved. You can now log in and start finding jobs that fit.</p>
+          <p style="margin:24px 0"><a href="https://candid8.fit/app.html" style="display:inline-block;background:#6366f1;color:#fff;text-decoration:none;padding:14px 32px;border-radius:12px;font-weight:600">Get Started →</a></p>
+          <p style="color:#71717a;font-size:14px">— The Candid8 Team</p>
+        </div>`
+      })
+    });
+  } catch(e) { console.error('Welcome email failed:', e.message); }
+
+  return Response.json({ ok: true }, { headers: cors });
+}
+
+async function handleAdminRevoke(url, env, cors, userId) {
+  requirePin(url);
+  const user = JSON.parse(await env.DATA.get(`user:${userId}`) || 'null');
+  if (!user) return Response.json({ ok: false, error: 'User not found' }, { status: 404, headers: cors });
+  user.approved = false;
+  await env.DATA.put(`user:${userId}`, JSON.stringify(user));
+  return Response.json({ ok: true }, { headers: cors });
+}
+
+async function handleAdminAlerts(url, env, cors) {
+  requirePin(url);
+  const usersIndex = JSON.parse(await env.DATA.get('users_index') || '[]');
+  const allAlerts = [];
+  for (const uid of usersIndex) {
+    const user = JSON.parse(await env.DATA.get(`user:${uid}`) || '{}');
+    const history = JSON.parse(await env.DATA.get(`user_alert_history:${uid}`) || '[]');
+    for (const h of history) {
+      allAlerts.push({ ...h, email: user.email || '?' });
+    }
+  }
+  allAlerts.sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at));
+  return Response.json({ ok: true, alerts: allAlerts.slice(0, 100) }, { headers: cors });
+}
+
+async function handleAdminStats(url, env, cors) {
+  requirePin(url);
+  // Basic stats
+  const usersIndex = JSON.parse(await env.DATA.get('users_index') || '[]');
+  return Response.json({ ok: true, total_users: usersIndex.length }, { headers: cors });
+}
+
+async function handleAdminInvite(url, request, env, cors) {
+  requirePin(url);
+  const { email } = await request.json();
+  if (!email || !email.includes('@')) return Response.json({ ok: false, error: 'Invalid email' }, { status: 400, headers: cors });
+  
+  const normalized = email.trim().toLowerCase();
+  const existingId = await env.DATA.get(`user_email:${normalized}`);
+  if (existingId) return Response.json({ ok: false, error: 'Account already exists' }, { status: 409, headers: cors });
+
+  // Generate random password
+  const password = crypto.randomUUID().substring(0, 12);
+  const id = uuid();
+  const hash = await hashPassword(password);
+  const user = { id, email: normalized, password_hash: hash, created_at: new Date().toISOString(), approved: true };
+  await env.DATA.put(`user:${id}`, JSON.stringify(user));
+  await env.DATA.put(`user_email:${normalized}`, id);
+
+  const usersIndex = JSON.parse(await env.DATA.get('users_index') || '[]');
+  if (!usersIndex.includes(id)) { usersIndex.push(id); await env.DATA.put('users_index', JSON.stringify(usersIndex)); }
+
+  // Send invite email
+  const apiKey = env.RESEND_API_KEY || 're_XvHm7q1S_DFWNdNXF9VD8qUdqREVxWHcK';
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Candid8 <alerts@candid8.fit>',
+        to: normalized,
+        subject: "You're invited to Candid8! 🎯",
+        html: `<div style="font-family:-apple-system,sans-serif;max-width:500px;margin:0 auto;padding:32px;background:#18181b;color:#e4e4e7;border-radius:16px">
+          <h1 style="color:#6366f1;margin-bottom:16px">You're In!</h1>
+          <p>You've been invited to Candid8 — the job matching platform that shows you your real fit.</p>
+          <p style="margin:16px 0"><strong>Your login:</strong><br>Email: ${normalized}<br>Password: ${password}</p>
+          <p style="margin:24px 0"><a href="https://candid8.fit/app.html" style="display:inline-block;background:#6366f1;color:#fff;text-decoration:none;padding:14px 32px;border-radius:12px;font-weight:600">Log In →</a></p>
+          <p style="color:#71717a;font-size:14px">Please change your password after logging in.</p>
+        </div>`
+      })
+    });
+  } catch(e) { console.error('Invite email failed:', e.message); }
+
+  return Response.json({ ok: true, user_id: id }, { headers: cors });
 }
 
 // ── Admin: Re-embed all jobs with normalized format ──────────────────────────

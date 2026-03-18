@@ -292,7 +292,7 @@
   <div class="container">
     <nav>
       <div class="logo">candid<span>8</span></div>
-      <a href="/app.html" class="badge" style="text-decoration:none">Try the Beta →</a>
+      <span class="badge">Coming Soon</span>
     </nav>
     
     <section class="hero">
@@ -406,7 +406,7 @@
         });
         const data = await res.json();
         if (data.ok) {
-          msgEl.textContent = "You're on the list! We'll be in touch.";
+          msgEl.textContent = "You're on the list! We'll email you when it's your turn.";
           msgEl.style.color = 'var(--green)';
           updateCount();
         } else {

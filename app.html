@@ -404,7 +404,11 @@
 
     // ── Init ──
     if (token && currentUser) {
-      checkOnboardingOrDashboard();
+      if (currentUser.approved === false) {
+        showWaitlistMessage();
+      } else {
+        checkOnboardingOrDashboard();
+      }
     }
 
     async function checkOnboardingOrDashboard() {
@@ -458,12 +462,29 @@
         currentUser = data.user;
         localStorage.setItem('candid8_token', token);
         localStorage.setItem('candid8_user', JSON.stringify(currentUser));
+        
+        // Check approval status
+        if (!currentUser.approved) {
+          showWaitlistMessage();
+          return;
+        }
         checkOnboardingOrDashboard();
       } catch (ex) {
         err.textContent = ex.message;
       } finally {
         btn.disabled = false;
       }
+    }
+
+    function showWaitlistMessage() {
+      document.getElementById('authScreen').innerHTML = `
+        <div class="logo">candid<span>8</span></div>
+        <div style="text-align:center;margin-top:40px">
+          <div style="font-size:2.5rem;margin-bottom:16px">⏳</div>
+          <h2 style="font-size:1.3rem;margin-bottom:12px">You're on the waitlist!</h2>
+          <p style="color:var(--text-muted);font-size:.95rem;max-width:340px;margin:0 auto">Thanks for signing up! We'll email you when your account is activated.</p>
+          <button class="btn btn-secondary" style="margin-top:24px;max-width:200px" onclick="logout()">Log out</button>
+        </div>`;
     }
 
     function logout() {
