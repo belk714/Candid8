@@ -375,7 +375,7 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
         const jobEmb = JSON.parse(job.embedding);
         const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
         const cosinePct = Math.round(cosineScore * 100);
-        if (cosinePct < 40) continue;
+        if (cosinePct < 50) continue;
 
         // Lazy parse structured requirements if missing
         if (!job.structured_requirements) {
@@ -545,6 +545,22 @@ async function route(url, request, env, cors) {
   if (path === '/api/admin/alerts' && method === 'GET') return handleAdminAlerts(url, env, cors);
   if (path === '/api/admin/stats' && method === 'GET') return handleAdminStats(url, env, cors);
   if (path === '/api/admin/profile' && method === 'GET') return handleAdminGetProfile(url, env, cors);
+  if (path === '/api/admin/matches' && method === 'GET') {
+    requirePin(url);
+    const userId = url.searchParams.get('user_id');
+    const matchesJson = await env.DATA.get(`user_matches:${userId}`) || '[]';
+    const matchIds = JSON.parse(matchesJson);
+    const matches = [];
+    for (const id of matchIds) {
+      const m = JSON.parse(await env.DATA.get(`match:${id}`) || 'null');
+      if (!m) continue;
+      const job = JSON.parse(await env.DATA.get(`job:${m.job_id}`) || 'null');
+      if (!job) continue;
+      matches.push({ title: job.title, company: job.company, cosine_pct: m.cosine_pct, score: m.score });
+    }
+    matches.sort((a, b) => (b.score ?? b.cosine_pct ?? 0) - (a.score ?? a.cosine_pct ?? 0));
+    return Response.json({ ok: true, count: matches.length, matches }, { headers: cors });
+  }
   if (path === '/api/admin/docs' && method === 'GET') {
     requirePin(url);
     const userId = url.searchParams.get('user_id');
@@ -1292,7 +1308,7 @@ async function computeMatches(userId, env, profile) {
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);
-    if (cosinePct < 40) continue;
+    if (cosinePct < 50) continue;
 
     // 3. Store as a candidate match (no score yet — user clicks "Analyze Fit" or alert engine scores it)
     const matchId = uuid();
@@ -2670,15 +2686,19 @@ async function handleWipeJobs(url, env, cors) {
 async function handleRecomputeMatches(url, env, cors) {
   requirePin(url);
   const usersIndex = JSON.parse(await env.DATA.get('users_index') || '[]');
-  let computed = 0;
-  for (const uid of usersIndex) {
-    const profile = JSON.parse(await env.DATA.get(`profile:${uid}`) || 'null');
-    if (profile && profile.embedding) {
-      await computeMatches(uid, env, profile);
-      computed++;
-    }
+  // Run in background via waitUntil — return immediately
+  const ctx = env._ctx;
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil((async () => {
+      for (const uid of usersIndex) {
+        const profile = JSON.parse(await env.DATA.get(`profile:${uid}`) || 'null');
+        if (profile && profile.embedding) {
+          await computeMatches(uid, env, profile);
+        }
+      }
+    })());
   }
-  return Response.json({ ok: true, users_recomputed: computed }, { headers: cors });
+  return Response.json({ ok: true, users_queued: usersIndex.length, status: 'computing in background' }, { headers: cors });
 }
 
 // ── Admin: Re-embed all jobs with normalized format ──────────────────────────
