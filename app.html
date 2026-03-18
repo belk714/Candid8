@@ -840,10 +840,15 @@
                   <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.summary || ''}</p>
                   ${breakdownBar('Skills', b.skills_match)}
                   ${b.skills_detail ? `<div class="breakdown-detail">
-                    <span class="detail-stat">${b.skills_detail.total_matched}/${b.skills_detail.total} skills found in description</span>
-                    ${b.skills_detail.matched_technical?.length ? `<div style="margin:4px 0"><span class="detail-label">✓ Technical:</span> ${b.skills_detail.matched_technical.map(s=>`<span class="tag" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
-                    ${b.skills_detail.matched_soft?.length ? `<div style="margin:4px 0"><span class="detail-label">✓ Soft:</span> ${b.skills_detail.matched_soft.map(s=>`<span class="tag soft" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
-                    ${b.skills_detail.unmatched_technical?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--text-muted)">Not found:</span> ${b.skills_detail.unmatched_technical.map(s=>`<span class="tag" style="font-size:.7rem;opacity:.4">${s}</span>`).join(' ')}</div>` : ''}
+                    ${b.skills_detail.total_required != null 
+                      ? `<span class="detail-stat">Job requires ${b.skills_detail.total_required} skills — you match ${(b.skills_detail.required_skills_matched||[]).length} (${b.skills_detail.total_required ? Math.round((b.skills_detail.required_skills_matched||[]).length / b.skills_detail.total_required * 100) : 0}%)</span>
+                         ${b.skills_detail.required_skills_matched?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--green)">✓ You have:</span> ${b.skills_detail.required_skills_matched.map(s=>`<span class="tag" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
+                         ${b.skills_detail.required_skills_missing?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--yellow)">✗ Gaps:</span> ${b.skills_detail.required_skills_missing.map(s=>`<span class="tag" style="font-size:.7rem;opacity:.5">${s}</span>`).join(' ')}</div>` : ''}
+                         ${b.skills_detail.preferred_skills_matched?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--text-muted)">✓ Preferred:</span> ${b.skills_detail.preferred_skills_matched.map(s=>`<span class="tag soft" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}`
+                      : `<span class="detail-stat">${b.skills_detail.total_matched}/${b.skills_detail.total} of your skills found in description</span>
+                         ${b.skills_detail.matched_technical?.length ? `<div style="margin:4px 0"><span class="detail-label">✓ Technical:</span> ${b.skills_detail.matched_technical.map(s=>`<span class="tag" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
+                         ${b.skills_detail.matched_soft?.length ? `<div style="margin:4px 0"><span class="detail-label">✓ Soft:</span> ${b.skills_detail.matched_soft.map(s=>`<span class="tag soft" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
+                         ${b.skills_detail.unmatched_technical?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--text-muted)">Not found:</span> ${b.skills_detail.unmatched_technical.map(s=>`<span class="tag" style="font-size:.7rem;opacity:.4">${s}</span>`).join(' ')}</div>` : ''}`}
                   </div>` : ''}
                   ${breakdownBar('Experience', b.experience_match)}
                   ${b.experience_detail ? `<div class="breakdown-detail">

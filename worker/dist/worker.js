@@ -35634,7 +35634,7 @@ async function route(url, request, env, cors) {
   if (path === "/api/jobs/search/analyze" && method === "POST") return handleJobSearchAnalyze(request, env, cors);
   if (path === "/api/admin/seed-jobs" && method === "POST") return handleSeedJobs(env, cors);
   if (path === "/api/admin/sync-jobs" && method === "POST") return handleSyncAdzunaJobs(request, env, cors);
-  if (path === "/api/admin/reembed-all" && method === "POST") return handleReembedAll(env, cors);
+  if (path === "/api/admin/reembed-all" && method === "POST") return handleReembedAll(url, env, cors);
   if (path === "/api/admin/dashboard" && method === "GET") return handleAdminDashboard(url, env, cors);
   if (path === "/api/admin/users" && method === "GET") return handleAdminUsers(url, env, cors);
   if (path.match(/^\/api\/admin\/users\/[^/]+\/approve$/) && method === "POST") {
@@ -35814,13 +35814,22 @@ async function handleDocUpload(request, env, cors) {
   docs.push(docId);
   await env.DATA.put(`user_docs:${userId}`, JSON.stringify(docs));
   let profileError = null;
+  let profileSummary = null;
   try {
-    await rebuildProfile(userId, env);
+    const profile = await rebuildProfileOnly(userId, env);
+    const sk = profile.structured_data?.skills || {};
+    const skillCount = sk.skill_count || 0;
+    const yoe = profile.structured_data?.years_of_experience || 0;
+    profileSummary = { skill_count: skillCount, years_of_experience: yoe };
+    const ctx = env._ctx;
+    if (ctx && ctx.waitUntil) {
+      ctx.waitUntil(computeMatches(userId, env, profile));
+    }
   } catch (e2) {
     profileError = e2.message;
     console.error("Profile rebuild failed:", e2);
   }
-  return Response.json({ ok: true, document: { id: docId, filename, uploaded_at: doc.uploaded_at }, profileError }, { headers: cors });
+  return Response.json({ ok: true, document: { id: docId, filename, uploaded_at: doc.uploaded_at }, profileError, profileSummary }, { headers: cors });
 }
 async function handleDocList(request, env, cors) {
   const userId = await requireAuth(request, env);
@@ -35892,6 +35901,22 @@ async function rebuildProfile(userId, env) {
   await computeMatches(userId, env, profile);
   return profile;
 }
+async function rebuildProfileOnly(userId, env) {
+  const docsJson = await env.DATA.get(`user_docs:${userId}`) || "[]";
+  const docIds = JSON.parse(docsJson);
+  let allText = "";
+  for (const id of docIds) {
+    const d2 = JSON.parse(await env.DATA.get(`doc:${id}`) || "null");
+    if (d2 && d2.raw_text && !d2.raw_text.startsWith("Failed to extract text")) allText += d2.raw_text + "\n\n";
+  }
+  if (!allText.trim()) throw new Error("No valid document text found.");
+  const structured = await parseResumeWithOpenAI(env, allText);
+  const embeddingText = buildNormalizedEmbeddingText("profile", structured);
+  const embedding = await getEmbedding(env, embeddingText);
+  const profile = { structured_data: structured, embedding, updated_at: (/* @__PURE__ */ new Date()).toISOString() };
+  await env.DATA.put(`profile:${userId}`, JSON.stringify(profile));
+  return profile;
+}
 async function handleGetSettings(request, env, cors) {
   const userId = await requireAuth(request, env);
   const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
@@ -35924,26 +35949,56 @@ async function handleGetAlerts(request, env, cors) {
   return Response.json({ ok: true, alerts: history }, { headers: cors });
 }
 var MAJOR_METROS = {
-  "Houston, TX": { lat: 29.7604, lng: -95.3698, state: "TX" },
-  "Dallas, TX": { lat: 32.7767, lng: -96.797, state: "TX" },
-  "Austin, TX": { lat: 30.2672, lng: -97.7431, state: "TX" },
-  "San Antonio, TX": { lat: 29.4241, lng: -98.4936, state: "TX" },
-  "Fort Worth, TX": { lat: 32.7555, lng: -97.3308, state: "TX" },
-  "Midland, TX": { lat: 31.9973, lng: -102.0779, state: "TX" },
-  "Denver, CO": { lat: 39.7392, lng: -104.9903, state: "CO" },
   "New York, NY": { lat: 40.7128, lng: -74.006, state: "NY" },
-  "Chicago, IL": { lat: 41.8781, lng: -87.6298, state: "IL" },
   "Los Angeles, CA": { lat: 34.0522, lng: -118.2437, state: "CA" },
-  "San Francisco, CA": { lat: 37.7749, lng: -122.4194, state: "CA" },
-  "Atlanta, GA": { lat: 33.749, lng: -84.388, state: "GA" },
-  "Boston, MA": { lat: 42.3601, lng: -71.0589, state: "MA" },
-  "Washington, DC": { lat: 38.9072, lng: -77.0369, state: "DC" },
-  "Seattle, WA": { lat: 47.6062, lng: -122.3321, state: "WA" },
+  "Chicago, IL": { lat: 41.8781, lng: -87.6298, state: "IL" },
+  "Houston, TX": { lat: 29.7604, lng: -95.3698, state: "TX" },
   "Phoenix, AZ": { lat: 33.4484, lng: -112.074, state: "AZ" },
-  "Miami, FL": { lat: 25.7617, lng: -80.1918, state: "FL" },
+  "Philadelphia, PA": { lat: 39.9526, lng: -75.1652, state: "PA" },
+  "San Antonio, TX": { lat: 29.4241, lng: -98.4936, state: "TX" },
+  "San Diego, CA": { lat: 32.7157, lng: -117.1611, state: "CA" },
+  "Dallas, TX": { lat: 32.7767, lng: -96.797, state: "TX" },
+  "San Jose, CA": { lat: 37.3382, lng: -121.8863, state: "CA" },
+  "Austin, TX": { lat: 30.2672, lng: -97.7431, state: "TX" },
+  "Jacksonville, FL": { lat: 30.3322, lng: -81.6557, state: "FL" },
+  "Fort Worth, TX": { lat: 32.7555, lng: -97.3308, state: "TX" },
+  "Columbus, OH": { lat: 39.9612, lng: -82.9988, state: "OH" },
+  "Indianapolis, IN": { lat: 39.7684, lng: -86.1581, state: "IN" },
   "Charlotte, NC": { lat: 35.2271, lng: -80.8431, state: "NC" },
-  "Pittsburgh, PA": { lat: 40.4406, lng: -79.9959, state: "PA" },
+  "San Francisco, CA": { lat: 37.7749, lng: -122.4194, state: "CA" },
+  "Seattle, WA": { lat: 47.6062, lng: -122.3321, state: "WA" },
+  "Denver, CO": { lat: 39.7392, lng: -104.9903, state: "CO" },
+  "Washington, DC": { lat: 38.9072, lng: -77.0369, state: "DC" },
+  "Nashville, TN": { lat: 36.1627, lng: -86.7816, state: "TN" },
   "Oklahoma City, OK": { lat: 35.4676, lng: -97.5164, state: "OK" },
+  "El Paso, TX": { lat: 31.7619, lng: -106.485, state: "TX" },
+  "Boston, MA": { lat: 42.3601, lng: -71.0589, state: "MA" },
+  "Portland, OR": { lat: 45.5152, lng: -122.6784, state: "OR" },
+  "Las Vegas, NV": { lat: 36.1699, lng: -115.1398, state: "NV" },
+  "Memphis, TN": { lat: 35.1495, lng: -90.049, state: "TN" },
+  "Louisville, KY": { lat: 38.2527, lng: -85.7585, state: "KY" },
+  "Baltimore, MD": { lat: 39.2904, lng: -76.6122, state: "MD" },
+  "Milwaukee, WI": { lat: 43.0389, lng: -87.9065, state: "WI" },
+  "Albuquerque, NM": { lat: 35.0844, lng: -106.6504, state: "NM" },
+  "Tucson, AZ": { lat: 32.2226, lng: -110.9747, state: "AZ" },
+  "Fresno, CA": { lat: 36.7378, lng: -119.7871, state: "CA" },
+  "Sacramento, CA": { lat: 38.5816, lng: -121.4944, state: "CA" },
+  "Kansas City, MO": { lat: 39.0997, lng: -94.5786, state: "MO" },
+  "Atlanta, GA": { lat: 33.749, lng: -84.388, state: "GA" },
+  "Miami, FL": { lat: 25.7617, lng: -80.1918, state: "FL" },
+  "Raleigh, NC": { lat: 35.7796, lng: -78.6382, state: "NC" },
+  "Omaha, NE": { lat: 41.2565, lng: -95.9345, state: "NE" },
+  "Minneapolis, MN": { lat: 44.9778, lng: -93.265, state: "MN" },
+  "Tampa, FL": { lat: 27.9506, lng: -82.4572, state: "FL" },
+  "New Orleans, LA": { lat: 29.9511, lng: -90.0715, state: "LA" },
+  "Cleveland, OH": { lat: 41.4993, lng: -81.6944, state: "OH" },
+  "Pittsburgh, PA": { lat: 40.4406, lng: -79.9959, state: "PA" },
+  "Cincinnati, OH": { lat: 39.1031, lng: -84.512, state: "OH" },
+  "St. Louis, MO": { lat: 38.627, lng: -90.1994, state: "MO" },
+  "Orlando, FL": { lat: 28.5383, lng: -81.3792, state: "FL" },
+  "Salt Lake City, UT": { lat: 40.7608, lng: -111.891, state: "UT" },
+  "Midland, TX": { lat: 31.9973, lng: -102.0779, state: "TX" },
+  "Richmond, VA": { lat: 37.5407, lng: -77.436, state: "VA" },
   "Remote": { lat: 0, lng: 0, state: "REMOTE" }
 };
 var CITY_COORDS = {
@@ -36112,18 +36167,6 @@ async function computeMatches(userId, env, profile) {
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);
     if (cosinePct < 45) continue;
-    if (!job.structured_requirements) {
-      try {
-        const descText = job.full_description || job.description || "";
-        if (descText.length > 50) {
-          const sr2 = await parseStructuredRequirements(env, job.title, job.company, descText);
-          job.structured_requirements = JSON.stringify(sr2);
-          await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
-        }
-      } catch (e2) {
-        console.error("Backfill structured requirements failed for", job.title, e2.message);
-      }
-    }
     const breakdown = generateBreakdown(profile.structured_data, job, cosinePct);
     const matchId = uuid();
     const match = {
@@ -37205,9 +37248,12 @@ async function handleAdminInvite(url, request, env, cors) {
   }
   return Response.json({ ok: true, user_id: id }, { headers: cors });
 }
-async function handleReembedAll(env, cors) {
+async function handleReembedAll(url, env, cors) {
   const jobsIndexJson = await env.DATA.get("jobs_index") || "[]";
-  const jobIds = JSON.parse(jobsIndexJson);
+  const allJobIds = JSON.parse(jobsIndexJson);
+  const offset = parseInt(url.searchParams.get("offset") || "0");
+  const limit = parseInt(url.searchParams.get("limit") || "5");
+  const jobIds = allJobIds.slice(offset, offset + limit);
   let reembedded = 0;
   let parsed = 0;
   let failed = 0;
@@ -37243,7 +37289,10 @@ async function handleReembedAll(env, cors) {
   }
   return Response.json({
     ok: true,
-    total_jobs: jobIds.length,
+    total_jobs: allJobIds.length,
+    batch_size: jobIds.length,
+    offset,
+    next_offset: offset + limit < allJobIds.length ? offset + limit : null,
     reembedded,
     newly_parsed: parsed,
     failed
