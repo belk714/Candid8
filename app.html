@@ -821,8 +821,8 @@
         el.innerHTML = data.matches.map((m, i) => {
           const b = m.breakdown || {};
           const isDetailed = b.detailed;
-          const scoreLabel = isDetailed ? `${m.score}%` : `~${m.score}%`;
-          const scoreTitle = isDetailed ? 'Detailed AI analysis' : 'Rough estimate — click for details';
+          const hasScore = m.score != null && isDetailed;
+          const scoreLabel = hasScore ? `${m.score}%` : '';
           return `
             <div class="match-card" onclick="if(!event.target.closest('details,a,button,.tag'))toggleMatchQuick(this,'${m.job.id}')">
               <div class="match-header">
@@ -832,41 +832,34 @@
                   <div class="location">${m.job.location}</div>
                   ${m.job.salary_min ? `<div class="salary">${formatSalary(m.job.salary_min)} – ${formatSalary(m.job.salary_max)}</div>` : ''}
                 </div>
-                <div class="score-badge ${scoreClass(m.score)}" id="badge-${m.job.id}" title="${scoreTitle}">${scoreLabel}${isDetailed ? ' <span style="font-size:.6rem">✓</span>' : ''}</div>
+                ${hasScore 
+                  ? `<div class="score-badge ${scoreClass(m.score)}" id="badge-${m.job.id}" title="AI-analyzed fit score">${scoreLabel}</div>`
+                  : `<div class="score-badge" id="badge-${m.job.id}" style="background:var(--surface2);color:var(--text-muted);font-size:.7rem;cursor:pointer" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')" title="Click to analyze fit">Analyze</div>`
+                }
               </div>
               ${b.matched_skills?.length ? `<div class="tags" style="margin-top:8px">${b.matched_skills.map(s=>`<span class="tag" style="font-size:.75rem">${s}</span>`).join('')}</div>` : ''}
+              ${b.strengths?.length && !b.matched_skills?.length ? `<div class="tags" style="margin-top:8px">${b.strengths.map(s=>`<span class="tag" style="font-size:.75rem">${s}</span>`).join('')}</div>` : ''}
               <div class="match-detail" id="detail-${m.job.id}">
                 <div class="quick-view" style="display:none">
-                  <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.summary || ''}</p>
-                  ${breakdownBar('Skills', b.skills_match)}
-                  ${b.skills_detail ? `<div class="breakdown-detail">
-                    ${b.skills_detail.total_required != null 
-                      ? `<span class="detail-stat">Job requires ${b.skills_detail.total_required} skills — you match ${(b.skills_detail.required_skills_matched||[]).length} (${b.skills_detail.total_required ? Math.round((b.skills_detail.required_skills_matched||[]).length / b.skills_detail.total_required * 100) : 0}%)</span>
-                         ${b.skills_detail.required_skills_matched?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--green)">✓ You have:</span> ${b.skills_detail.required_skills_matched.map(s=>`<span class="tag" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
-                         ${b.skills_detail.required_skills_missing?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--yellow)">✗ Gaps:</span> ${b.skills_detail.required_skills_missing.map(s=>`<span class="tag" style="font-size:.7rem;opacity:.5">${s}</span>`).join(' ')}</div>` : ''}
-                         ${b.skills_detail.preferred_skills_matched?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--text-muted)">✓ Preferred:</span> ${b.skills_detail.preferred_skills_matched.map(s=>`<span class="tag soft" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}`
-                      : `<span class="detail-stat">${b.skills_detail.total_matched}/${b.skills_detail.total} of your skills found in description</span>
-                         ${b.skills_detail.matched_technical?.length ? `<div style="margin:4px 0"><span class="detail-label">✓ Technical:</span> ${b.skills_detail.matched_technical.map(s=>`<span class="tag" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
-                         ${b.skills_detail.matched_soft?.length ? `<div style="margin:4px 0"><span class="detail-label">✓ Soft:</span> ${b.skills_detail.matched_soft.map(s=>`<span class="tag soft" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
-                         ${b.skills_detail.unmatched_technical?.length ? `<div style="margin:4px 0"><span class="detail-label" style="color:var(--text-muted)">Not found:</span> ${b.skills_detail.unmatched_technical.map(s=>`<span class="tag" style="font-size:.7rem;opacity:.4">${s}</span>`).join(' ')}</div>` : ''}`}
-                  </div>` : ''}
-                  ${breakdownBar('Experience', b.experience_match)}
-                  ${b.experience_detail ? `<div class="breakdown-detail">
-                    <span class="detail-stat">${b.experience_detail.reason}</span>
-                    ${b.experience_detail.related_roles?.length ? `<div style="margin:4px 0"><span class="detail-label">Related roles:</span> ${b.experience_detail.related_roles.map(r=>`<span class="tag" style="font-size:.7rem">${r}</span>`).join(' ')}</div>` : ''}
-                  </div>` : ''}
-                  ${breakdownBar('Industry', b.industry_match)}
-                  ${b.industry_detail ? `<div class="breakdown-detail">
-                    ${b.industry_detail.matched?.length ? `<span class="detail-stat">✓ Matched: ${b.industry_detail.matched.join(', ')}</span>` : `<span class="detail-stat" style="color:var(--text-muted)">No direct industry keyword match</span>`}
-                    ${b.industry_detail.job_category ? `<div style="margin-top:2px"><span class="detail-label">Category:</span> ${b.industry_detail.job_category}</div>` : ''}
-                  </div>` : ''}
+                  ${isDetailed ? `
+                    <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.recommendation || b.summary || ''}</p>
+                    ${breakdownBar('Skills', b.skills_match)}
+                    ${b.matched_skills?.length ? `<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--green)">✓ Matched:</span> ${b.matched_skills.map(s=>\`<span class="tag" style="font-size:.7rem">\${s}</span>\`).join(' ')}</div></div>` : ''}
+                    ${b.missing_skills?.length ? `<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--yellow)">✗ Gaps:</span> ${b.missing_skills.map(s=>\`<span class="tag" style="font-size:.7rem;opacity:.5">\${s}</span>\`).join(' ')}</div></div>` : ''}
+                    ${breakdownBar('Experience', b.experience_match)}
+                    ${b.experience_analysis ? `<div class="breakdown-detail"><span class="detail-stat" style="font-size:.8rem">${b.experience_analysis}</span></div>` : ''}
+                    ${breakdownBar('Industry', b.industry_match)}
+                    ${b.industry_analysis ? `<div class="breakdown-detail"><span class="detail-stat" style="font-size:.8rem">${b.industry_analysis}</span></div>` : ''}
+                    ${breakdownBar('Education', b.education_match)}
+                  ` : `
+                    <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">Click "Analyze Fit" to get an AI-powered fit score and detailed breakdown.</p>
+                  `}
                   <details style="margin:8px 0 12px" onclick="event.stopPropagation();loadFullDescription(this,'${m.job.id}')">
                     <summary style="cursor:pointer;font-size:.85rem;color:var(--accent)">📄 Full Job Description</summary>
                     <div class="full-desc" style="font-size:.8rem;color:var(--text-muted);margin-top:8px;white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:12px;background:var(--surface2);border-radius:8px"><div class="spinner" style="margin:8px auto"></div></div>
                   </details>
                   ${m.job.url ? `<a href="${m.job.url}" target="_blank" onclick="event.stopPropagation()" style="display:inline-block;margin-bottom:12px;color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
-                  <p style="font-size:.75rem;color:var(--text-muted);margin:4px 0 12px;font-style:italic">Scores are rough estimates based on keyword matching</p>
-                  <button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">🔍 Run Detailed AI Analysis</button>
+                  ${!isDetailed ? `<button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">🔍 Analyze Fit</button>` : ''}
                   <div id="detailed-${m.job.id}"></div>
                 </div>
               </div>
@@ -916,61 +909,45 @@
         const b = data.match.breakdown;
         const job = data.job;
 
-        // Update headline score
+        // Update headline score badge
         const badge = document.getElementById(`badge-${jobId}`);
         if (badge && data.match.score) {
-          badge.textContent = data.match.score + '% ✓';
-          badge.title = 'Detailed AI analysis';
+          badge.textContent = data.match.score + '%';
+          badge.title = 'AI-analyzed fit score';
           badge.className = 'score-badge ' + scoreClass(data.match.score);
+          badge.style = '';
+          badge.onclick = null;
         }
 
-        // Hide the rough estimate note, button, and stale breakdown details
+        // Hide the analyze button
         if (btn) btn.style.display = 'none';
-        const roughNote = card.querySelector(`#detail-${jobId} .quick-view > p[style*="italic"]`);
-        if (roughNote) roughNote.style.display = 'none';
-        // Hide all old breakdown-detail blocks (stale keyword matching stats)
-        card.querySelectorAll(`#detail-${jobId} .breakdown-detail`).forEach(el => el.style.display = 'none');
-        // Update summary text
-        const summaryP = quickView.querySelector(':scope > p');
-        if (summaryP && b.recommendation) summaryP.textContent = b.recommendation;
 
-        // Update the quick-view bars with detailed scores
+        // Rebuild the quick-view with detailed results
         const quickView = card.querySelector(`#detail-${jobId} .quick-view`);
-        const bars = quickView.querySelectorAll('.breakdown-bar');
-        const barData = [
-          { label: 'Skills', val: b.skills_match },
-          { label: 'Experience', val: b.experience_match },
-          { label: 'Industry', val: b.industry_match }
-        ];
-        bars.forEach((bar, i) => {
-          if (barData[i]) {
-            const fill = bar.querySelector('.breakdown-fill');
-            const valEl = bar.querySelector('.breakdown-val');
-            if (fill) { fill.style.width = barData[i].val + '%'; fill.style.background = barColor(barData[i].val); }
-            if (valEl) valEl.textContent = barData[i].val + '%';
-          }
-        });
-
-        container.innerHTML = `
-          ${b.recommendation ? `<div style="background:var(--surface2);border-radius:10px;padding:12px 16px;margin-bottom:16px"><p style="font-size:.9rem;color:var(--text-secondary);margin:0">💡 ${b.recommendation}</p></div>` : ''}
-          ${breakdownBar('Education', b.education_match)}
-          ${b.education_analysis ? `<p class="analysis-text">${b.education_analysis}</p>` : ''}
-          ${b.leadership_match != null ? breakdownBar('Leadership', b.leadership_match) : ''}
-          ${b.leadership_analysis ? `<p class="analysis-text">${b.leadership_analysis}</p>` : ''}
-          <div style="margin-top:8px">
-            ${b.skills_analysis ? `<p class="analysis-text" style="padding-left:0"><strong>Skills:</strong> ${b.skills_analysis}</p>` : ''}
-            ${b.matched_skills?.length ? `<div style="margin-bottom:4px"><strong style="font-size:.8rem">Matched:</strong> ${b.matched_skills.map(s=>`<span class="tag" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
-            ${b.missing_skills?.length ? `<div style="margin-bottom:8px"><strong style="font-size:.8rem;color:var(--yellow)">Missing:</strong> ${b.missing_skills.map(s=>`<span class="tag" style="font-size:.7rem;opacity:.6">${s}</span>`).join(' ')}</div>` : ''}
-            ${b.experience_analysis ? `<p class="analysis-text" style="padding-left:0"><strong>Experience:</strong> ${b.experience_analysis}</p>` : ''}
-            ${b.industry_analysis ? `<p class="analysis-text" style="padding-left:0"><strong>Industry:</strong> ${b.industry_analysis}</p>` : ''}
-          </div>
-          ${b.strengths?.length ? `<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">✓ Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.strengths.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
-          ${b.gaps?.length ? `<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">⚠ Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.gaps.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
-          <p style="font-size:.7rem;color:var(--text-muted);margin-top:12px;font-style:italic">✓ Detailed AI analysis — score based on weighted skills, experience, industry, education & leadership fit</p>
-        `;
+        if (quickView) {
+          // Clear old content except full-desc details and job link
+          const details = quickView.querySelector('details');
+          const link = quickView.querySelector('a[target="_blank"]');
+          quickView.innerHTML = `
+            ${b.recommendation ? `<p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">💡 ${b.recommendation}</p>` : ''}
+            ${breakdownBar('Skills', b.skills_match)}
+            ${b.matched_skills?.length ? `<div style="margin:4px 0 8px"><span style="color:var(--green);font-size:.8rem;font-weight:600">✓ Matched:</span> ${b.matched_skills.map(s=>\`<span class="tag" style="font-size:.7rem">\${s}</span>\`).join(' ')}</div>` : ''}
+            ${b.missing_skills?.length ? `<div style="margin:4px 0 8px"><span style="color:var(--yellow);font-size:.8rem;font-weight:600">✗ Gaps:</span> ${b.missing_skills.map(s=>\`<span class="tag" style="font-size:.7rem;opacity:.5">\${s}</span>\`).join(' ')}</div>` : ''}
+            ${breakdownBar('Experience', b.experience_match)}
+            ${b.experience_analysis ? `<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">${b.experience_analysis}</p>` : ''}
+            ${breakdownBar('Industry', b.industry_match)}
+            ${b.industry_analysis ? `<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">${b.industry_analysis}</p>` : ''}
+            ${breakdownBar('Education', b.education_match)}
+            ${b.strengths?.length ? `<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">✓ Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.strengths.map(s=>\`<li>\${s}</li>\`).join('')}</ul></div>` : ''}
+            ${b.gaps?.length ? `<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">⚠ Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.gaps.map(s=>\`<li>\${s}</li>\`).join('')}</ul></div>` : ''}
+          `;
+          // Re-add full description details and link
+          if (details) quickView.appendChild(details);
+          if (link) quickView.appendChild(link);
+        }
       } catch (ex) {
         container.innerHTML = `<p style="color:var(--red);font-size:.85rem">Analysis failed: ${ex.message}</p>`;
-        if (btn) { btn.disabled = false; btn.textContent = '🔍 Run Detailed AI Analysis'; }
+        if (btn) { btn.disabled = false; btn.textContent = '🔍 Analyze Fit'; }
       }
     }
 

@@ -35320,46 +35320,51 @@ var extractText = async (...args) => {
 };
 
 // index.js
+var BROAD_CATEGORIES = [
+  "management consultant",
+  "strategy consultant",
+  "operations manager",
+  "project manager",
+  "program manager",
+  "business analyst",
+  "digital transformation",
+  "change management",
+  "data analyst",
+  "financial analyst",
+  "marketing manager",
+  "product manager",
+  "software engineer",
+  "engineering manager",
+  "supply chain manager",
+  "human resources manager",
+  "sales director",
+  "account executive",
+  "energy consultant",
+  "oil gas engineer",
+  "sustainability manager",
+  "executive director",
+  "vice president operations",
+  "chief of staff"
+];
 var index_default = {
   async scheduled(event, env, ctx) {
     try {
-      const usersJson = await env.DATA.get("users_index") || "[]";
-      const userIds = JSON.parse(usersJson);
-      let allQueries = /* @__PURE__ */ new Set();
-      let allLocations = /* @__PURE__ */ new Set();
-      for (const userId of userIds) {
-        const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || "null");
-        const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
-        if (profile && profile.structured_data) {
-          const queries2 = await generateSearchQueries(env, profile.structured_data);
-          queries2.forEach((q2) => allQueries.add(q2));
-        }
-        if (settings.locations?.length) {
-          settings.locations.forEach((l2) => allLocations.add(l2));
-        }
-      }
-      if (allQueries.size === 0) {
-        allQueries = /* @__PURE__ */ new Set(["strategy manager", "digital transformation", "management consulting", "operations manager", "energy consultant"]);
-      }
-      const queries = [...allQueries].slice(0, 25);
-      const location = allLocations.size > 0 ? [...allLocations].map((l2) => l2.split(",")[0].trim()).join(" OR ") : "Texas";
-      const seenIds = /* @__PURE__ */ new Set();
-      const allJobs = [];
       const existingIndexJson = await env.DATA.get("jobs_index") || "[]";
-      const existingIds = JSON.parse(existingIndexJson);
+      let existingIds = JSON.parse(existingIndexJson);
       const existingAdzunaIds = /* @__PURE__ */ new Set();
       for (const eid of existingIds) {
         const existingJob = JSON.parse(await env.DATA.get(`job:${eid}`) || "null");
         if (existingJob && existingJob.adzuna_id) existingAdzunaIds.add(existingJob.adzuna_id);
       }
-      for (const query of queries) {
+      const seenIds = /* @__PURE__ */ new Set();
+      const allJobs = [];
+      for (const category of BROAD_CATEGORIES) {
         try {
           const params = new URLSearchParams({
             app_id: ADZUNA_APP_ID,
             app_key: ADZUNA_APP_KEY,
-            results_per_page: "5",
-            what: query,
-            where: location.length > 50 ? "Texas" : location,
+            results_per_page: "10",
+            what: category,
             "content-type": "application/json",
             sort_by: "date"
           });
@@ -35384,29 +35389,74 @@ var index_default = {
             }
           }
         } catch (e2) {
-          console.error(`Cron: Adzuna query "${query}" failed:`, e2.message);
+          console.error(`Cron Phase1: "${category}" failed:`, e2.message);
+        }
+      }
+      const skipPhase2 = true;
+      const usersJson = await env.DATA.get("users_index") || "[]";
+      const userIds = JSON.parse(usersJson);
+      let profileQueries = /* @__PURE__ */ new Set();
+      let profileLocations = /* @__PURE__ */ new Set();
+      if (!skipPhase2) {
+        for (const userId of userIds) {
+          const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || "null");
+          const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
+          if (profile && profile.structured_data) {
+            try {
+              const queries = await generateSearchQueries(env, profile.structured_data);
+              queries.forEach((q2) => profileQueries.add(q2));
+            } catch (e2) {
+              console.error("Cron Phase2: query gen failed for", userId, e2.message);
+            }
+          }
+          if (settings.locations?.length) {
+            settings.locations.forEach((l2) => profileLocations.add(l2));
+          }
+        }
+      }
+      const profileQueriesArr = [...profileQueries].slice(0, 25);
+      const location = profileLocations.size > 0 ? [...profileLocations].map((l2) => l2.split(",")[0].trim()).join(" OR ") : "";
+      for (const query of profileQueriesArr) {
+        try {
+          const params = new URLSearchParams({
+            app_id: ADZUNA_APP_ID,
+            app_key: ADZUNA_APP_KEY,
+            results_per_page: "5",
+            what: query,
+            "content-type": "application/json",
+            sort_by: "date"
+          });
+          if (location && location.length <= 50) params.set("where", location);
+          const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
+          const data = await res.json();
+          if (data.results) {
+            for (const r2 of data.results) {
+              if (seenIds.has(r2.id) || existingAdzunaIds.has(String(r2.id))) continue;
+              seenIds.add(r2.id);
+              allJobs.push({
+                adzuna_id: String(r2.id),
+                title: r2.title || "",
+                company: r2.company?.display_name || "Unknown",
+                location: r2.location?.display_name || "",
+                description: r2.description || "",
+                salary_min: r2.salary_min || null,
+                salary_max: r2.salary_max || null,
+                url: r2.redirect_url || "",
+                category: r2.category?.label || "",
+                created: r2.created || (/* @__PURE__ */ new Date()).toISOString()
+              });
+            }
+          }
+        } catch (e2) {
+          console.error(`Cron Phase2: "${query}" failed:`, e2.message);
         }
       }
       const newJobIds = [];
       for (const j2 of allJobs) {
         const id = uuid();
-        let fullDesc = j2.description;
-        try {
-          if (j2.url) {
-            const scraped = await scrapeFullDescription(j2.url);
-            if (scraped && scraped.length > fullDesc.length) fullDesc = scraped;
-          }
-        } catch (e2) {
-        }
-        let structuredReq = null;
-        try {
-          structuredReq = await parseStructuredRequirements(env, j2.title, j2.company, fullDesc);
-        } catch (e2) {
-          console.error("Cron: structured parse failed:", j2.title, e2.message);
-        }
+        const embedText = `${j2.title} at ${j2.company}. ${j2.location}. ${j2.category}. ${j2.description}`;
         let embedding = null;
         try {
-          const embedText = structuredReq ? buildNormalizedEmbeddingText("job", structuredReq) : `${j2.title} at ${j2.company}. ${j2.location}. ${j2.category}. ${fullDesc}`;
           embedding = await getEmbedding(env, embedText);
         } catch (e2) {
           console.error("Cron: embedding failed:", j2.title, e2.message);
@@ -35418,26 +35468,30 @@ var index_default = {
           company: j2.company,
           location: j2.location,
           description: j2.description,
-          full_description: fullDesc !== j2.description ? fullDesc : void 0,
           salary_min: j2.salary_min,
           salary_max: j2.salary_max,
           url: j2.url,
           category: j2.category,
           source: "adzuna",
           embedding: embedding ? JSON.stringify(embedding) : null,
-          structured_requirements: structuredReq ? JSON.stringify(structuredReq) : null,
+          structured_requirements: null,
           created_at: j2.created
         };
         await env.DATA.put(`job:${id}`, JSON.stringify(job));
         newJobIds.push(id);
-        await new Promise((r2) => setTimeout(r2, 300));
       }
       if (newJobIds.length > 0) {
-        const updatedIndex = [...existingIds, ...newJobIds];
-        await env.DATA.put("jobs_index", JSON.stringify(updatedIndex));
-        await matchNewJobsAgainstUsers(env, newJobIds);
+        existingIds = [...existingIds, ...newJobIds];
+        await env.DATA.put("jobs_index", JSON.stringify(existingIds));
       }
-      console.log(`Cron sync complete: ${newJobIds.length} new jobs from ${queries.length} queries`);
+      await env.DATA.put("last_sync_time", (/* @__PURE__ */ new Date()).toISOString());
+      await env.DATA.put("last_sync_result", JSON.stringify({
+        new_jobs: newJobIds.length,
+        phase1_categories: BROAD_CATEGORIES.length,
+        phase2_queries: profileQueriesArr.length,
+        total_index: existingIds.length
+      }));
+      console.log(`Cron sync complete: ${newJobIds.length} new jobs, ${existingIds.length} total`);
     } catch (e2) {
       console.error("Cron sync error:", e2.message);
     }
@@ -35564,20 +35618,49 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
         const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
         const cosinePct = Math.round(cosineScore * 100);
         if (cosinePct < 45) continue;
-        const breakdown = generateBreakdown(profile.structured_data, job, cosinePct);
+        if (!job.structured_requirements) {
+          try {
+            const descText = job.full_description || job.description || "";
+            if (descText.length > 50) {
+              const sr2 = await parseStructuredRequirements(env, job.title, job.company, descText);
+              if (sr2) {
+                job.structured_requirements = JSON.stringify(sr2);
+                await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
+              }
+            }
+          } catch (e2) {
+          }
+        }
+        let breakdown = { pending: true, cosine_score: cosinePct };
+        let score = null;
+        try {
+          const analysis = await generateDetailedBreakdown(env, profile.structured_data, job);
+          breakdown = { ...analysis, detailed: true, cosine_score: cosinePct };
+          const weights = { skills_match: 0.4, experience_match: 0.25, industry_match: 0.2, education_match: 0.1, certification_match: 0.05 };
+          let weightedScore = 0, totalWeight = 0;
+          for (const [key, weight] of Object.entries(weights)) {
+            if (breakdown[key] != null) {
+              weightedScore += breakdown[key] * weight;
+              totalWeight += weight;
+            }
+          }
+          if (totalWeight > 0) score = Math.round(weightedScore / totalWeight);
+        } catch (e2) {
+          console.error("Detailed analysis failed for alert:", job.title, e2.message);
+        }
         const matchId = uuid();
         const match = {
           id: matchId,
           user_id: userId,
           job_id: jobId,
-          score: breakdown.overall,
+          score,
           breakdown: JSON.stringify(breakdown),
           created_at: (/* @__PURE__ */ new Date()).toISOString()
         };
         await env.DATA.put(`match:${matchId}`, JSON.stringify(match));
         newMatchIds.push(matchId);
-        if (alertsEnabled && breakdown.overall >= alertThreshold) {
-          await sendAlertEmail(env, alertEmail, job, breakdown.overall, breakdown);
+        if (alertsEnabled && score != null && score >= alertThreshold) {
+          await sendAlertEmail(env, alertEmail, job, score, breakdown);
           alertedJobIds.add(jobId);
           const historyJson = await env.DATA.get(`user_alert_history:${userId}`) || "[]";
           const history = JSON.parse(historyJson);
@@ -35585,7 +35668,7 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
             job_id: jobId,
             job_title: job.title,
             company: job.company,
-            score: breakdown.overall,
+            score,
             sent_at: (/* @__PURE__ */ new Date()).toISOString()
           });
           await env.DATA.put(`user_alert_history:${userId}`, JSON.stringify(history.slice(0, 50)));
@@ -35635,6 +35718,8 @@ async function route(url, request, env, cors) {
   if (path === "/api/admin/seed-jobs" && method === "POST") return handleSeedJobs(env, cors);
   if (path === "/api/admin/sync-jobs" && method === "POST") return handleSyncAdzunaJobs(request, env, cors);
   if (path === "/api/admin/reembed-all" && method === "POST") return handleReembedAll(url, env, cors);
+  if (path === "/api/admin/recompute-matches" && method === "POST") return handleRecomputeMatches(url, env, cors);
+  if (path === "/api/admin/wipe-jobs" && method === "POST") return handleWipeJobs(url, env, cors);
   if (path === "/api/admin/dashboard" && method === "GET") return handleAdminDashboard(url, env, cors);
   if (path === "/api/admin/users" && method === "GET") return handleAdminUsers(url, env, cors);
   if (path.match(/^\/api\/admin\/users\/[^/]+\/approve$/) && method === "POST") {
@@ -36130,7 +36215,7 @@ async function handleGetMatchDetail(request, env, cors, jobId) {
     try {
       const analysis = await generateDetailedBreakdown(env, profile.structured_data, job);
       breakdown = { ...breakdown, ...analysis, detailed: true };
-      const weights = { skills_match: 0.3, experience_match: 0.3, industry_match: 0.2, education_match: 0.1, leadership_match: 0.1 };
+      const weights = { skills_match: 0.4, experience_match: 0.25, industry_match: 0.2, education_match: 0.1, certification_match: 0.05 };
       let weightedScore = 0, totalWeight = 0;
       for (const [key, weight] of Object.entries(weights)) {
         if (breakdown[key] != null) {
@@ -36167,14 +36252,14 @@ async function computeMatches(userId, env, profile) {
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);
     if (cosinePct < 45) continue;
-    const breakdown = generateBreakdown(profile.structured_data, job, cosinePct);
     const matchId = uuid();
     const match = {
       id: matchId,
       user_id: userId,
       job_id: jobId,
-      score: breakdown.overall,
-      breakdown: JSON.stringify(breakdown),
+      score: null,
+      cosine_pct: cosinePct,
+      breakdown: JSON.stringify({ pending: true, cosine_score: cosinePct }),
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     };
     await env.DATA.put(`match:${matchId}`, JSON.stringify(match));
@@ -36204,7 +36289,14 @@ function generateBreakdown(profile, job, cosinePct) {
     sr2 = null;
   }
   if (!sr2) {
-    return generateBreakdownLegacy(profile, job, cosinePct);
+    return {
+      overall: cosinePct,
+      cosine_score: cosinePct,
+      skills_match: null,
+      experience_match: null,
+      industry_match: null,
+      summary: `${cosinePct}% semantic fit for ${job.title} at ${job.company}. Detailed breakdown unavailable \u2014 job needs structured parsing.`
+    };
   }
   const sk = profile?.skills || {};
   const isNewFormat = !!sk.technical_domain;
@@ -36229,14 +36321,14 @@ function generateBreakdown(profile, job, cosinePct) {
   const reqMatched = reqSkills.filter((rs2) => allUserSkills.some((us2) => skillsOverlap(us2, rs2)));
   const reqMissing = reqSkills.filter((rs2) => !allUserSkills.some((us2) => skillsOverlap(us2, rs2)));
   const prefMatched = prefSkills.filter((ps2) => allUserSkills.some((us2) => skillsOverlap(us2, ps2)));
-  const reqSkillScore = reqSkills.length > 0 ? reqMatched.length / reqSkills.length * 100 : 70;
-  const prefSkillScore = prefSkills.length > 0 ? prefMatched.length / prefSkills.length * 100 : 50;
+  const reqSkillScore = reqSkills.length > 0 ? reqMatched.length / reqSkills.length * 100 : 30;
+  const prefSkillScore = prefSkills.length > 0 ? prefMatched.length / prefSkills.length * 100 : 30;
   const skillsScore = Math.round(reqSkillScore * 0.8 + prefSkillScore * 0.2);
   const jobMinYoe = sr2.min_years_experience || 0;
   let expScore, expFit;
   if (jobMinYoe === 0) {
-    expScore = 80;
-    expFit = "match";
+    expScore = 50;
+    expFit = "unknown";
   } else if (userYoe >= jobMinYoe) {
     expScore = userYoe <= jobMinYoe * 1.5 ? 95 : 80;
     expFit = userYoe <= jobMinYoe * 1.5 ? "match" : "over";
@@ -36256,18 +36348,18 @@ function generateBreakdown(profile, job, cosinePct) {
   const indMatched = jobIndustries.filter((ji2) => userIndustries.some(
     (ui2) => ui2.toLowerCase().includes(ji2.toLowerCase()) || ji2.toLowerCase().includes(ui2.toLowerCase())
   ));
-  const industryScore = jobIndustries.length > 0 ? indMatched.length > 0 ? Math.round(indMatched.length / jobIndustries.length * 100) : 20 : 60;
+  const industryScore = jobIndustries.length > 0 ? indMatched.length > 0 ? Math.round(indMatched.length / jobIndustries.length * 100) : 15 : 30;
   const jobEdu = (sr2.education_required || "").toLowerCase();
-  let eduScore = 60;
+  let eduScore = 50;
   if (!jobEdu || jobEdu === "none") {
-    eduScore = 80;
+    eduScore = 50;
   } else {
     const hasMatch = userEducation.some((ue2) => ue2.includes("master") || ue2.includes("mba") || ue2.includes("phd") || ue2.includes("doctorate") || jobEdu.includes("bachelor") && (ue2.includes("bachelor") || ue2.includes("master") || ue2.includes("mba") || ue2.includes("phd")) || jobEdu.includes("master") && (ue2.includes("master") || ue2.includes("mba") || ue2.includes("phd")) || ue2.includes(jobEdu));
     eduScore = hasMatch ? 90 : 40;
   }
   const jobCerts = (sr2.certifications_preferred || []).map((c2) => c2.toLowerCase());
   const certsMatched = jobCerts.filter((jc2) => userCerts.some((uc2) => uc2.includes(jc2) || jc2.includes(uc2)));
-  const certScore = jobCerts.length > 0 ? certsMatched.length > 0 ? 85 : 50 : 70;
+  const certScore = jobCerts.length > 0 ? certsMatched.length > 0 ? 85 : 40 : 50;
   const structuredScore = Math.round(
     skillsScore * 0.35 + expScore * 0.2 + seniorityScore * 0.1 + industryScore * 0.15 + eduScore * 0.1 + certScore * 0.1
   );
@@ -36315,7 +36407,7 @@ function generateBreakdown(profile, job, cosinePct) {
   };
 }
 function computeSkillCoverage(userSkillObjects, requiredSkills) {
-  if (!requiredSkills.length) return { proficient_plus_pct: 100, total_pct: 100 };
+  if (!requiredSkills.length) return { proficient_plus_pct: 0, total_pct: 0 };
   let totalMatched = 0, proficientMatched = 0;
   for (const rs2 of requiredSkills) {
     const match = userSkillObjects.find((us2) => skillsOverlap(us2.skill, rs2));
@@ -36341,77 +36433,6 @@ function categorizeMatchedSkills(userSkillObjects, matchedSkills) {
 }
 function categorizeMissingSkills(userSkillObjects, missingSkills) {
   return missingSkills;
-}
-function generateBreakdownLegacy(profile, job, score) {
-  const desc = (job.description || "").toLowerCase();
-  const titleDesc = ((job.title || "") + " " + (job.description || "")).toLowerCase();
-  const sk = profile?.skills || {};
-  const isNewFormat = !!sk.technical_domain;
-  let techSkills, softSkills;
-  if (isNewFormat) {
-    techSkills = [...sk.technical_domain || [], ...sk.tools_platforms || [], ...sk.methodologies || [], ...sk.leadership_consulting || [], ...sk.industry_knowledge || []].map((s2) => typeof s2 === "string" ? s2 : s2.skill);
-    softSkills = (sk.soft_skills || []).map((s2) => typeof s2 === "string" ? s2 : s2.skill);
-  } else {
-    techSkills = sk.technical || [];
-    softSkills = sk.soft || [];
-  }
-  const allSkills = [...techSkills, ...softSkills];
-  function skillMatchesText(skill, text) {
-    if (text.includes(skill.toLowerCase())) return true;
-    const words = skill.toLowerCase().split(/[\s\/\-]+/).filter((w2) => w2.length >= 3);
-    if (words.length === 0) return false;
-    if (words.length === 1) return text.includes(words[0]);
-    const found = words.filter((w2) => text.includes(w2));
-    return found.length >= Math.ceil(words.length * 0.6);
-  }
-  const matchedTech = techSkills.filter((s2) => skillMatchesText(s2, titleDesc));
-  const unmatchedTech = techSkills.filter((s2) => !skillMatchesText(s2, titleDesc));
-  const matchedSoft = softSkills.filter((s2) => skillMatchesText(s2, titleDesc));
-  const unmatchedSoft = softSkills.filter((s2) => !skillMatchesText(s2, titleDesc));
-  const totalMatched = matchedTech.length + matchedSoft.length;
-  const skillsPct = allSkills.length ? Math.round(totalMatched / allSkills.length * 100) : score;
-  const profileIndustries = profile?.industries || [];
-  const jobCat = (job.category || job.title || "").toLowerCase();
-  const matchedIndustries = profileIndustries.filter((i2) => desc.includes(i2.toLowerCase()) || jobCat.includes(i2.toLowerCase()));
-  const industryMatch = matchedIndustries.length > 0;
-  const yoe = profile?.years_of_experience || 0;
-  const seniorTerms = ["senior", "lead", "principal", "director", "vp", "manager"];
-  const jobSeniority = seniorTerms.some((t2) => (job.title || "").toLowerCase().includes(t2));
-  const expPct = yoe >= 10 ? jobSeniority ? 90 : 80 : yoe >= 5 ? jobSeniority ? 65 : 80 : 55;
-  const expReason = yoe >= 10 && jobSeniority ? `${yoe} years experience aligns with senior-level role` : yoe >= 10 ? `${yoe} years experience (role may not require seniority)` : `${yoe} years experience`;
-  const jobHistory = profile?.job_history || [];
-  const titleMatches = jobHistory.filter((jh) => {
-    const jhTitle = (jh.title || "").toLowerCase();
-    const jobTitle = (job.title || "").toLowerCase();
-    return jobTitle.split(/\s+/).some((w2) => w2.length > 3 && jhTitle.includes(w2)) || jhTitle.split(/\s+/).some((w2) => w2.length > 3 && jobTitle.includes(w2));
-  });
-  return {
-    overall: score,
-    skills_match: Math.min(100, Math.max(20, skillsPct)),
-    skills_detail: {
-      matched_technical: matchedTech,
-      unmatched_technical: unmatchedTech,
-      matched_soft: matchedSoft,
-      unmatched_soft: unmatchedSoft,
-      total: allSkills.length,
-      total_matched: totalMatched
-    },
-    experience_match: Math.min(100, expPct),
-    experience_detail: {
-      years: yoe,
-      seniority_match: jobSeniority,
-      reason: expReason,
-      related_roles: titleMatches.map((j2) => j2.title).slice(0, 3)
-    },
-    industry_match: industryMatch ? Math.min(100, score + 10) : Math.max(30, score - 15),
-    industry_detail: {
-      profile_industries: profileIndustries,
-      matched: matchedIndustries,
-      job_category: job.category || ""
-    },
-    matched_skills: [...matchedTech, ...matchedSoft].slice(0, 8),
-    summary: `${score}% semantic fit for ${job.title} at ${job.company}.`
-  };
 }
 async function generateDetailedBreakdown(env, profile, job) {
   const profileSummary = JSON.stringify({
@@ -36443,12 +36464,19 @@ async function generateDetailedBreakdown(env, profile, job) {
   "industry_analysis": "1-2 sentences on industry alignment",
   "education_match": <0-100>,
   "education_analysis": "1-2 sentences on education fit",
-  "leadership_match": <0-100>,
-  "leadership_analysis": "1-2 sentences on leadership/seniority fit",
+  "certification_match": <0-100>,
   "strengths": ["strength1", "strength2", "strength3"],
   "gaps": ["gap1", "gap2"],
   "recommendation": "2-3 sentence overall recommendation"
-}`
+}
+
+SCORING GUIDELINES:
+- skills_match: Be strict. Only count skills the candidate demonstrably has. If 3/10 required skills match, score around 30, not 60.
+- experience_match: Years AND relevance both matter. 15 years in energy doesn't equal 15 years in finance.
+- industry_match: If the candidate has never worked in the job's industry, score below 30. Adjacent industries get partial credit.
+- education_match: Match degree level and field relevance.
+- certification_match: If job lists specific certs and candidate has them, score high. If no certs listed, score 50 (neutral).
+- Be honest and calibrated. A mediocre fit should score 40-55, not 65-75.`
         },
         {
           role: "user",
@@ -36460,7 +36488,7 @@ Title: ${job.title}
 Company: ${job.company}
 Location: ${job.location}
 Category: ${job.category || ""}
-Description: ${(job.description || "").substring(0, 3e3)}`
+Description: ${(job.full_description || job.description || "").substring(0, 4e3)}`
         }
       ],
       max_tokens: 1500,
@@ -37247,6 +37275,36 @@ async function handleAdminInvite(url, request, env, cors) {
     console.error("Invite email failed:", e2.message);
   }
   return Response.json({ ok: true, user_id: id }, { headers: cors });
+}
+async function handleWipeJobs(url, env, cors) {
+  requirePin(url);
+  const jobsIndexJson = await env.DATA.get("jobs_index") || "[]";
+  const jobIds = JSON.parse(jobsIndexJson);
+  let deleted = 0;
+  for (const jid of jobIds) {
+    await env.DATA.delete(`job:${jid}`);
+    deleted++;
+  }
+  await env.DATA.put("jobs_index", JSON.stringify([]));
+  const usersIndex = JSON.parse(await env.DATA.get("users_index") || "[]");
+  for (const uid of usersIndex) {
+    await env.DATA.put(`user_matches:${uid}`, JSON.stringify([]));
+    await env.DATA.put(`user_alerts:${uid}`, JSON.stringify([]));
+  }
+  return Response.json({ ok: true, deleted }, { headers: cors });
+}
+async function handleRecomputeMatches(url, env, cors) {
+  requirePin(url);
+  const usersIndex = JSON.parse(await env.DATA.get("users_index") || "[]");
+  let computed = 0;
+  for (const uid of usersIndex) {
+    const profile = JSON.parse(await env.DATA.get(`profile:${uid}`) || "null");
+    if (profile && profile.embedding) {
+      await computeMatches(uid, env, profile);
+      computed++;
+    }
+  }
+  return Response.json({ ok: true, users_recomputed: computed }, { headers: cors });
 }
 async function handleReembedAll(url, env, cors) {
   const jobsIndexJson = await env.DATA.get("jobs_index") || "[]";
