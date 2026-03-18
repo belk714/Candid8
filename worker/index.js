@@ -24,6 +24,145 @@ import { extractText as unpdfExtractText } from 'unpdf';
  */
 
 export default {
+  async scheduled(event, env, ctx) {
+    // Cron-triggered job sync: pull new jobs from Adzuna for all users with profiles, then match & alert
+    try {
+      const usersJson = await env.DATA.get('users_index') || '[]';
+      const userIds = JSON.parse(usersJson);
+      
+      // Collect unique search queries from all user profiles
+      let allQueries = new Set();
+      let allLocations = new Set();
+      
+      for (const userId of userIds) {
+        const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || 'null');
+        const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || '{}');
+        
+        if (profile && profile.structured_data) {
+          // Generate queries from this user's profile
+          const queries = await generateSearchQueries(env, profile.structured_data);
+          queries.forEach(q => allQueries.add(q));
+        }
+        
+        // Collect user locations for geo-targeted search
+        if (settings.locations?.length) {
+          settings.locations.forEach(l => allLocations.add(l));
+        }
+      }
+      
+      if (allQueries.size === 0) {
+        allQueries = new Set(['strategy manager', 'digital transformation', 'management consulting', 'operations manager', 'energy consultant']);
+      }
+      
+      const queries = [...allQueries].slice(0, 25); // Cap at 25 queries
+      const location = allLocations.size > 0 ? [...allLocations].map(l => l.split(',')[0].trim()).join(' OR ') : 'Texas';
+      
+      // Sync jobs from Adzuna
+      const seenIds = new Set();
+      const allJobs = [];
+      const existingIndexJson = await env.DATA.get('jobs_index') || '[]';
+      const existingIds = JSON.parse(existingIndexJson);
+      const existingAdzunaIds = new Set();
+      for (const eid of existingIds) {
+        const existingJob = JSON.parse(await env.DATA.get(`job:${eid}`) || 'null');
+        if (existingJob && existingJob.adzuna_id) existingAdzunaIds.add(existingJob.adzuna_id);
+      }
+      
+      for (const query of queries) {
+        try {
+          const params = new URLSearchParams({
+            app_id: ADZUNA_APP_ID,
+            app_key: ADZUNA_APP_KEY,
+            results_per_page: '5',
+            what: query,
+            where: location.length > 50 ? 'Texas' : location,
+            'content-type': 'application/json',
+            sort_by: 'date'
+          });
+          const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
+          const data = await res.json();
+          if (data.results) {
+            for (const r of data.results) {
+              if (seenIds.has(r.id) || existingAdzunaIds.has(String(r.id))) continue;
+              seenIds.add(r.id);
+              allJobs.push({
+                adzuna_id: String(r.id),
+                title: r.title || '',
+                company: r.company?.display_name || 'Unknown',
+                location: r.location?.display_name || '',
+                description: r.description || '',
+                salary_min: r.salary_min || null,
+                salary_max: r.salary_max || null,
+                url: r.redirect_url || '',
+                category: r.category?.label || '',
+                created: r.created || new Date().toISOString()
+              });
+            }
+          }
+        } catch (e) {
+          console.error(`Cron: Adzuna query "${query}" failed:`, e.message);
+        }
+      }
+      
+      // Process new jobs: scrape full description, parse structured requirements, embed, store
+      const newJobIds = [];
+      for (const j of allJobs) {
+        const id = uuid();
+        
+        // Scrape full description
+        let fullDesc = j.description;
+        try {
+          if (j.url) {
+            const scraped = await scrapeFullDescription(j.url);
+            if (scraped && scraped.length > fullDesc.length) fullDesc = scraped;
+          }
+        } catch (e) { /* use short desc */ }
+        
+        // Parse structured requirements
+        let structuredReq = null;
+        try {
+          structuredReq = await parseStructuredRequirements(env, j.title, j.company, fullDesc);
+        } catch (e) { console.error('Cron: structured parse failed:', j.title, e.message); }
+        
+        // Embed using normalized format
+        let embedding = null;
+        try {
+          const embedText = structuredReq 
+            ? buildNormalizedEmbeddingText('job', structuredReq)
+            : `${j.title} at ${j.company}. ${j.location}. ${j.category}. ${fullDesc}`;
+          embedding = await getEmbedding(env, embedText);
+        } catch (e) { console.error('Cron: embedding failed:', j.title, e.message); }
+        
+        const job = {
+          id, adzuna_id: j.adzuna_id, title: j.title, company: j.company, location: j.location,
+          description: j.description, full_description: fullDesc !== j.description ? fullDesc : undefined,
+          salary_min: j.salary_min, salary_max: j.salary_max, url: j.url, category: j.category,
+          source: 'adzuna', embedding: embedding ? JSON.stringify(embedding) : null,
+          structured_requirements: structuredReq ? JSON.stringify(structuredReq) : null,
+          created_at: j.created
+        };
+        await env.DATA.put(`job:${id}`, JSON.stringify(job));
+        newJobIds.push(id);
+        
+        // Small delay between jobs to avoid rate limits
+        await new Promise(r => setTimeout(r, 300));
+      }
+      
+      // Update jobs index
+      if (newJobIds.length > 0) {
+        const updatedIndex = [...existingIds, ...newJobIds];
+        await env.DATA.put('jobs_index', JSON.stringify(updatedIndex));
+        
+        // Match new jobs against all users and send alerts
+        await matchNewJobsAgainstUsers(env, newJobIds);
+      }
+      
+      console.log(`Cron sync complete: ${newJobIds.length} new jobs from ${queries.length} queries`);
+    } catch (e) {
+      console.error('Cron sync error:', e.message);
+    }
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     env._ctx = ctx;
@@ -75,7 +214,7 @@ async function requireAuth(request, env) {
 
 async function sendAlertEmail(env, to, job, score, breakdown) {
   const apiKey = env.RESEND_API_KEY || 're_XvHm7q1S_DFWNdNXF9VD8qUdqREVxWHcK';
-  const from = 'Candid8 <onboarding@resend.dev>';
+  const from = 'Candid8 <alerts@candid8.fit>';
   const subject = `🎯 ${score}% Match: ${job.title} at ${job.company}`;
 
   const scoreColor = score >= 85 ? '#22c55e' : score >= 70 ? '#eab308' : '#f97316';

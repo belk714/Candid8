@@ -35321,6 +35321,127 @@ var extractText = async (...args) => {
 
 // index.js
 var index_default = {
+  async scheduled(event, env, ctx) {
+    try {
+      const usersJson = await env.DATA.get("users_index") || "[]";
+      const userIds = JSON.parse(usersJson);
+      let allQueries = /* @__PURE__ */ new Set();
+      let allLocations = /* @__PURE__ */ new Set();
+      for (const userId of userIds) {
+        const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || "null");
+        const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
+        if (profile && profile.structured_data) {
+          const queries2 = await generateSearchQueries(env, profile.structured_data);
+          queries2.forEach((q2) => allQueries.add(q2));
+        }
+        if (settings.locations?.length) {
+          settings.locations.forEach((l2) => allLocations.add(l2));
+        }
+      }
+      if (allQueries.size === 0) {
+        allQueries = /* @__PURE__ */ new Set(["strategy manager", "digital transformation", "management consulting", "operations manager", "energy consultant"]);
+      }
+      const queries = [...allQueries].slice(0, 25);
+      const location = allLocations.size > 0 ? [...allLocations].map((l2) => l2.split(",")[0].trim()).join(" OR ") : "Texas";
+      const seenIds = /* @__PURE__ */ new Set();
+      const allJobs = [];
+      const existingIndexJson = await env.DATA.get("jobs_index") || "[]";
+      const existingIds = JSON.parse(existingIndexJson);
+      const existingAdzunaIds = /* @__PURE__ */ new Set();
+      for (const eid of existingIds) {
+        const existingJob = JSON.parse(await env.DATA.get(`job:${eid}`) || "null");
+        if (existingJob && existingJob.adzuna_id) existingAdzunaIds.add(existingJob.adzuna_id);
+      }
+      for (const query of queries) {
+        try {
+          const params = new URLSearchParams({
+            app_id: ADZUNA_APP_ID,
+            app_key: ADZUNA_APP_KEY,
+            results_per_page: "5",
+            what: query,
+            where: location.length > 50 ? "Texas" : location,
+            "content-type": "application/json",
+            sort_by: "date"
+          });
+          const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
+          const data = await res.json();
+          if (data.results) {
+            for (const r2 of data.results) {
+              if (seenIds.has(r2.id) || existingAdzunaIds.has(String(r2.id))) continue;
+              seenIds.add(r2.id);
+              allJobs.push({
+                adzuna_id: String(r2.id),
+                title: r2.title || "",
+                company: r2.company?.display_name || "Unknown",
+                location: r2.location?.display_name || "",
+                description: r2.description || "",
+                salary_min: r2.salary_min || null,
+                salary_max: r2.salary_max || null,
+                url: r2.redirect_url || "",
+                category: r2.category?.label || "",
+                created: r2.created || (/* @__PURE__ */ new Date()).toISOString()
+              });
+            }
+          }
+        } catch (e2) {
+          console.error(`Cron: Adzuna query "${query}" failed:`, e2.message);
+        }
+      }
+      const newJobIds = [];
+      for (const j2 of allJobs) {
+        const id = uuid();
+        let fullDesc = j2.description;
+        try {
+          if (j2.url) {
+            const scraped = await scrapeFullDescription(j2.url);
+            if (scraped && scraped.length > fullDesc.length) fullDesc = scraped;
+          }
+        } catch (e2) {
+        }
+        let structuredReq = null;
+        try {
+          structuredReq = await parseStructuredRequirements(env, j2.title, j2.company, fullDesc);
+        } catch (e2) {
+          console.error("Cron: structured parse failed:", j2.title, e2.message);
+        }
+        let embedding = null;
+        try {
+          const embedText = structuredReq ? buildNormalizedEmbeddingText("job", structuredReq) : `${j2.title} at ${j2.company}. ${j2.location}. ${j2.category}. ${fullDesc}`;
+          embedding = await getEmbedding(env, embedText);
+        } catch (e2) {
+          console.error("Cron: embedding failed:", j2.title, e2.message);
+        }
+        const job = {
+          id,
+          adzuna_id: j2.adzuna_id,
+          title: j2.title,
+          company: j2.company,
+          location: j2.location,
+          description: j2.description,
+          full_description: fullDesc !== j2.description ? fullDesc : void 0,
+          salary_min: j2.salary_min,
+          salary_max: j2.salary_max,
+          url: j2.url,
+          category: j2.category,
+          source: "adzuna",
+          embedding: embedding ? JSON.stringify(embedding) : null,
+          structured_requirements: structuredReq ? JSON.stringify(structuredReq) : null,
+          created_at: j2.created
+        };
+        await env.DATA.put(`job:${id}`, JSON.stringify(job));
+        newJobIds.push(id);
+        await new Promise((r2) => setTimeout(r2, 300));
+      }
+      if (newJobIds.length > 0) {
+        const updatedIndex = [...existingIds, ...newJobIds];
+        await env.DATA.put("jobs_index", JSON.stringify(updatedIndex));
+        await matchNewJobsAgainstUsers(env, newJobIds);
+      }
+      console.log(`Cron sync complete: ${newJobIds.length} new jobs from ${queries.length} queries`);
+    } catch (e2) {
+      console.error("Cron sync error:", e2.message);
+    }
+  },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     env._ctx = ctx;
@@ -35361,7 +35482,7 @@ async function requireAuth(request, env) {
 }
 async function sendAlertEmail(env, to2, job, score, breakdown) {
   const apiKey = env.RESEND_API_KEY || "re_XvHm7q1S_DFWNdNXF9VD8qUdqREVxWHcK";
-  const from = "Candid8 <onboarding@resend.dev>";
+  const from = "Candid8 <alerts@candid8.fit>";
   const subject = `\u{1F3AF} ${score}% Match: ${job.title} at ${job.company}`;
   const scoreColor = score >= 85 ? "#22c55e" : score >= 70 ? "#eab308" : "#f97316";
   const matchedSkills = (breakdown.skills_detail?.required_skills_matched || breakdown.matched_skills || []).slice(0, 6);

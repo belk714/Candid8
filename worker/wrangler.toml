@@ -6,6 +6,9 @@ routes = [
   { pattern = "candid8.fit/api/*", zone_id = "ce2026529be6e3b2b85d252f72238f1c" }
 ]
 
+[triggers]
+crons = ["0 */6 * * *"]
+
 [[kv_namespaces]]
 binding = "WAITLIST"
 id = "2199a7981fb44c8baddb31150cc052c5"
