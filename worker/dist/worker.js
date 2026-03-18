@@ -35359,6 +35359,126 @@ async function requireAuth(request, env) {
   if (!userId) throw new Error("Unauthorized");
   return userId;
 }
+async function sendAlertEmail(env, to2, job, score, breakdown) {
+  const apiKey = env.RESEND_API_KEY || "re_XvHm7q1S_DFWNdNXF9VD8qUdqREVxWHcK";
+  const from = "Candid8 <onboarding@resend.dev>";
+  const subject = `\u{1F3AF} ${score}% Match: ${job.title} at ${job.company}`;
+  const scoreColor = score >= 85 ? "#22c55e" : score >= 70 ? "#eab308" : "#f97316";
+  const matchedSkills = (breakdown.skills_detail?.required_skills_matched || breakdown.matched_skills || []).slice(0, 6);
+  const gaps = (breakdown.skills_detail?.required_skills_missing || breakdown.gaps || []).slice(0, 4);
+  const salaryText = job.salary_min && job.salary_max ? `$${Math.round(job.salary_min / 1e3)}k \u2013 $${Math.round(job.salary_max / 1e3)}k` : job.salary_min ? `From $${Math.round(job.salary_min / 1e3)}k` : "";
+  const skillTags = matchedSkills.map((s2) => `<span style="display:inline-block;background:#166534;color:#bbf7d0;padding:4px 10px;border-radius:12px;font-size:13px;margin:3px">${s2}</span>`).join("");
+  const gapTags = gaps.map((s2) => `<span style="display:inline-block;background:#854d0e;color:#fef08a;padding:4px 10px;border-radius:12px;font-size:13px;margin:3px">${s2}</span>`).join("");
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0a;padding:20px 0">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#18181b;border-radius:16px;overflow:hidden;max-width:100%">
+  <tr><td style="padding:32px 32px 0;text-align:center">
+    <div style="font-size:28px;font-weight:700;color:#fff;margin-bottom:4px">Candid8</div>
+    <div style="color:#a1a1aa;font-size:14px;margin-bottom:24px">New job match found</div>
+    <div style="display:inline-block;background:${scoreColor};color:#000;font-size:36px;font-weight:800;padding:12px 28px;border-radius:16px;margin-bottom:16px">${score}%</div>
+  </td></tr>
+  <tr><td style="padding:24px 32px">
+    <div style="font-size:20px;font-weight:600;color:#fff">${job.title}</div>
+    <div style="color:#a1a1aa;font-size:15px;margin-top:4px">${job.company} \xB7 ${job.location || "Location not specified"}</div>
+    ${salaryText ? `<div style="color:#22c55e;font-size:15px;margin-top:6px;font-weight:500">${salaryText}</div>` : ""}
+  </td></tr>
+  ${matchedSkills.length ? `<tr><td style="padding:0 32px 16px"><div style="color:#a1a1aa;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Matched Skills</div>${skillTags}</td></tr>` : ""}
+  ${gaps.length ? `<tr><td style="padding:0 32px 16px"><div style="color:#a1a1aa;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Key Gaps</div>${gapTags}</td></tr>` : ""}
+  <tr><td style="padding:16px 32px 32px;text-align:center">
+    ${job.url ? `<a href="${job.url}" style="display:inline-block;background:#6366f1;color:#fff;text-decoration:none;padding:14px 32px;border-radius:12px;font-weight:600;font-size:15px">View Job \u2192</a>` : ""}
+  </td></tr>
+  <tr><td style="padding:16px 32px 24px;text-align:center;border-top:1px solid #27272a">
+    <a href="https://candid8.fit/app.html" style="color:#a1a1aa;font-size:13px;text-decoration:none">Manage alerts</a>
+    <span style="color:#3f3f46;margin:0 8px">\xB7</span>
+    <a href="https://candid8.fit/app.html" style="color:#a1a1aa;font-size:13px;text-decoration:none">View all matches</a>
+  </td></tr>
+</table>
+</td></tr></table></body></html>`;
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to: to2, subject, html })
+    });
+    const data = await res.json();
+    return { ok: res.ok, data };
+  } catch (e2) {
+    console.error("Email send failed:", e2.message);
+    return { ok: false, error: e2.message };
+  }
+}
+async function matchNewJobsAgainstUsers(env, newJobIds) {
+  if (!newJobIds || !newJobIds.length) return;
+  const usersIndexJson = await env.DATA.get("users_index") || "[]";
+  const userIds = JSON.parse(usersIndexJson);
+  if (!userIds.length) return;
+  for (const userId of userIds) {
+    try {
+      const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || "null");
+      if (!profile || !profile.embedding) continue;
+      const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
+      const locations = settings.locations || [];
+      const radius = settings.radius || 50;
+      if (!locations.length) continue;
+      const alertsEnabled = settings.alerts_enabled !== false;
+      const alertThreshold = settings.alert_threshold || 75;
+      const user = JSON.parse(await env.DATA.get(`user:${userId}`) || "null");
+      if (!user) continue;
+      const alertEmail = settings.alert_email || user.email;
+      const alertedJson = await env.DATA.get(`user_alerts:${userId}`) || "[]";
+      const alertedJobIds = new Set(JSON.parse(alertedJson));
+      const existingMatchesJson = await env.DATA.get(`user_matches:${userId}`) || "[]";
+      const existingMatchIds = JSON.parse(existingMatchesJson);
+      const newMatchIds = [];
+      for (const jobId of newJobIds) {
+        if (alertedJobIds.has(jobId)) continue;
+        const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
+        if (!job || !job.embedding) continue;
+        if (!jobMatchesLocationFilter(job, locations, radius)) continue;
+        if (settings.salary_min && job.salary_max && job.salary_max < settings.salary_min) continue;
+        if (settings.salary_max && job.salary_min && job.salary_min > settings.salary_max) continue;
+        const jobEmb = JSON.parse(job.embedding);
+        const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
+        const cosinePct = Math.round(cosineScore * 100);
+        if (cosinePct < 45) continue;
+        const breakdown = generateBreakdown(profile.structured_data, job, cosinePct);
+        const matchId = uuid();
+        const match = {
+          id: matchId,
+          user_id: userId,
+          job_id: jobId,
+          score: breakdown.overall,
+          breakdown: JSON.stringify(breakdown),
+          created_at: (/* @__PURE__ */ new Date()).toISOString()
+        };
+        await env.DATA.put(`match:${matchId}`, JSON.stringify(match));
+        newMatchIds.push(matchId);
+        if (alertsEnabled && breakdown.overall >= alertThreshold) {
+          await sendAlertEmail(env, alertEmail, job, breakdown.overall, breakdown);
+          alertedJobIds.add(jobId);
+          const historyJson = await env.DATA.get(`user_alert_history:${userId}`) || "[]";
+          const history = JSON.parse(historyJson);
+          history.unshift({
+            job_id: jobId,
+            job_title: job.title,
+            company: job.company,
+            score: breakdown.overall,
+            sent_at: (/* @__PURE__ */ new Date()).toISOString()
+          });
+          await env.DATA.put(`user_alert_history:${userId}`, JSON.stringify(history.slice(0, 50)));
+        }
+      }
+      await env.DATA.put(`user_alerts:${userId}`, JSON.stringify([...alertedJobIds]));
+      if (newMatchIds.length) {
+        await env.DATA.put(`user_matches:${userId}`, JSON.stringify([...existingMatchIds, ...newMatchIds]));
+      }
+    } catch (e2) {
+      console.error("Match-on-ingest failed for user", userId, e2.message);
+    }
+  }
+}
 async function route(url, request, env, cors) {
   const path = url.pathname;
   const method = request.method;
@@ -35381,6 +35501,7 @@ async function route(url, request, env, cors) {
     const jobId = path.split("/api/matches/")[1];
     return handleGetMatchDetail(request, env, cors, jobId);
   }
+  if (path === "/api/alerts" && method === "GET") return handleGetAlerts(request, env, cors);
   if (path === "/api/jobs/locations" && method === "GET") return handleGetJobLocations(env, cors);
   if (path.startsWith("/api/jobs/") && path.endsWith("/description") && method === "GET") {
     const jobId = path.split("/api/jobs/")[1].replace("/description", "");
@@ -35426,6 +35547,12 @@ async function handleSignup(request, env, cors) {
   const user = { id, email: normalized, password_hash: hash, created_at: (/* @__PURE__ */ new Date()).toISOString() };
   await env.DATA.put(`user:${id}`, JSON.stringify(user));
   await env.DATA.put(`user_email:${normalized}`, id);
+  const usersIndexJson = await env.DATA.get("users_index") || "[]";
+  const usersIndex = JSON.parse(usersIndexJson);
+  if (!usersIndex.includes(id)) {
+    usersIndex.push(id);
+    await env.DATA.put("users_index", JSON.stringify(usersIndex));
+  }
   const token = uuid();
   await env.SESSIONS.put(token, id, { expirationTtl: 86400 * 7 });
   return Response.json({ ok: true, token, user: { id, email: normalized } }, { headers: cors });
@@ -35566,16 +35693,26 @@ async function handleUpdateSettings(request, env, cors) {
   const userId = await requireAuth(request, env);
   const body = await request.json();
   const locations = Array.isArray(body.locations) ? body.locations.slice(0, 3) : [];
+  const existing = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
   const settings = {
     locations,
     radius: body.radius || 50,
     salary_min: body.salary_min || 0,
     salary_max: body.salary_max || 0,
-    industries: body.industries || []
+    industries: body.industries || [],
+    alerts_enabled: body.alerts_enabled !== void 0 ? body.alerts_enabled : existing.alerts_enabled !== void 0 ? existing.alerts_enabled : true,
+    alert_threshold: body.alert_threshold || existing.alert_threshold || 75,
+    alert_email: body.alert_email || existing.alert_email || ""
   };
   await env.DATA.put(`user_settings:${userId}`, JSON.stringify(settings));
   const warning = locations.length === 0 ? "No cities set \u2014 alerts won't fire without at least one location." : null;
   return Response.json({ ok: true, settings, warning }, { headers: cors });
+}
+async function handleGetAlerts(request, env, cors) {
+  const userId = await requireAuth(request, env);
+  const historyJson = await env.DATA.get(`user_alert_history:${userId}`) || "[]";
+  const history = JSON.parse(historyJson);
+  return Response.json({ ok: true, alerts: history }, { headers: cors });
 }
 var MAJOR_METROS = {
   "Houston, TX": { lat: 29.7604, lng: -95.3698, state: "TX" },
@@ -36569,6 +36706,10 @@ async function handleSyncAdzunaJobs(request, env, cors) {
         break;
       }
     }
+  }
+  const ctx = env._ctx;
+  if (ctx && ctx.waitUntil && newJobIds.length > 0) {
+    ctx.waitUntil(matchNewJobsAgainstUsers(env, newJobIds));
   }
   return Response.json({
     ok: true,

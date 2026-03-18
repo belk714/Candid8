@@ -245,6 +245,30 @@
             <button type="submit" class="btn">Save Preferences</button>
           </form>
         </div>
+        <div class="card" style="margin-top:20px">
+          <h3>🔔 Job Alerts</h3>
+          <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:16px">Get emailed when new jobs match your profile. Requires at least 1 city selected and a resume uploaded.</p>
+          <div class="form-group" style="margin-bottom:16px">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+              <input type="checkbox" id="settAlertsEnabled" checked style="width:auto;accent-color:var(--accent)">
+              <span>Enable job alerts</span>
+            </label>
+          </div>
+          <div class="form-group" style="margin-bottom:16px">
+            <label>Minimum fit score for alerts: <strong id="thresholdVal">75</strong>%</label>
+            <input type="range" id="settAlertThreshold" min="60" max="100" step="5" value="75" oninput="document.getElementById('thresholdVal').textContent=this.value" style="width:100%">
+          </div>
+          <div class="form-group" style="margin-bottom:16px">
+            <label>Alert email</label>
+            <input type="email" id="settAlertEmail" placeholder="defaults to your signup email" class="settings-form">
+            <p style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Leave blank to use your account email</p>
+          </div>
+          <button class="btn" onclick="saveAlertSettings()" style="width:100%">Save Alert Settings</button>
+        </div>
+        <div class="card" style="margin-top:20px">
+          <h3>📬 Recent Alerts</h3>
+          <div id="alertHistory" style="color:var(--text-muted);font-size:.9rem">Loading...</div>
+        </div>
       </div>
     </main>
   </div>
@@ -792,6 +816,62 @@
         toast('Failed to save', 'error');
       }
     }
+
+    // ── Alert Settings ──
+    async function saveAlertSettings() {
+      try {
+        const body = {
+          locations: selectedLocations,
+          radius: parseInt(document.getElementById('settRadius').value) || 50,
+          salary_min: parseInt(document.getElementById('settSalMin').value) || 0,
+          salary_max: parseInt(document.getElementById('settSalMax').value) || 0,
+          industries: document.getElementById('settIndustries').value.split(',').map(s => s.trim()).filter(Boolean),
+          alerts_enabled: document.getElementById('settAlertsEnabled').checked,
+          alert_threshold: parseInt(document.getElementById('settAlertThreshold').value) || 75,
+          alert_email: document.getElementById('settAlertEmail').value.trim()
+        };
+        await fetch(`${API}/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(body) });
+        toast('Alert settings saved!');
+      } catch (ex) {
+        toast('Failed to save alert settings', 'error');
+      }
+    }
+
+    async function loadAlertHistory() {
+      try {
+        const res = await fetch(`${API}/alerts`, { headers: authHeaders() });
+        const data = await res.json();
+        const el = document.getElementById('alertHistory');
+        if (!data.ok || !data.alerts || !data.alerts.length) {
+          el.innerHTML = '<p style="color:var(--text-muted)">No alerts sent yet.</p>';
+          return;
+        }
+        el.innerHTML = data.alerts.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+          <div><strong>${a.job_title}</strong><br><span style="font-size:.8rem;color:var(--text-muted)">${a.company}</span></div>
+          <div style="text-align:right"><span style="background:var(--accent);color:#fff;padding:2px 8px;border-radius:8px;font-size:.8rem;font-weight:600">${a.score}%</span><br><span style="font-size:.75rem;color:var(--text-muted)">${new Date(a.sent_at).toLocaleDateString()}</span></div>
+        </div>`).join('');
+      } catch (ex) {
+        document.getElementById('alertHistory').innerHTML = '<p style="color:var(--text-muted)">Failed to load.</p>';
+      }
+    }
+
+    // Extend loadSettings to also load alert prefs
+    const _origLoadSettings = loadSettings;
+    loadSettings = async function() {
+      await _origLoadSettings();
+      try {
+        const res = await fetch(`${API}/settings`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.ok && data.settings) {
+          document.getElementById('settAlertsEnabled').checked = data.settings.alerts_enabled !== false;
+          const thresh = data.settings.alert_threshold || 75;
+          document.getElementById('settAlertThreshold').value = thresh;
+          document.getElementById('thresholdVal').textContent = thresh;
+          document.getElementById('settAlertEmail').value = data.settings.alert_email || '';
+        }
+      } catch(ex) {}
+      loadAlertHistory();
+    };
   </script>
 </body>
 </html>
