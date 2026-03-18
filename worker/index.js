@@ -544,6 +544,8 @@ async function route(url, request, env, cors) {
   }
   if (path === '/api/admin/alerts' && method === 'GET') return handleAdminAlerts(url, env, cors);
   if (path === '/api/admin/stats' && method === 'GET') return handleAdminStats(url, env, cors);
+  if (path === '/api/admin/profile' && method === 'GET') return handleAdminGetProfile(url, env, cors);
+  if (path === '/api/admin/profile' && method === 'PATCH') return handleAdminPatchProfile(url, request, env, cors);
   if (path === '/api/admin/invite' && method === 'POST') return handleAdminInvite(url, request, env, cors);
 
   return new Response('Not found', { status: 404, headers: cors });
@@ -1861,33 +1863,58 @@ async function extractTextWithOpenAI(env, base64Content, filename) {
   const ext = filename.toLowerCase().split('.').pop();
   
   if (ext === 'pdf') {
-    // Extract text directly from PDF binary
+    // Strategy: Try unpdf text extraction first. If it looks good, use it.
+    // If it's thin or garbled, fall back to GPT-4o vision for accurate extraction.
     const bytes = Uint8Array.from(atob(base64Content), c => c.charCodeAt(0));
-    let rawText = await extractTextFromPDF(bytes);
-    
-    // If we got decent text, optionally clean it up with GPT
-    if (rawText.length > 50) {
-      try {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: `Clean up and organize this extracted resume text. Return only the clean text, preserving all information:\n\n${rawText.substring(0, 10000)}` }],
-            max_tokens: 4000
-          })
-        });
-        const data = await res.json();
-        if (data.choices && data.choices[0]) return data.choices[0].message.content;
-      } catch (e) {
-        // Fall through to raw text
-      }
-      return rawText;
+    let rawText = '';
+    try {
+      rawText = await extractTextFromPDF(bytes);
+    } catch (e) {
+      // unpdf failed entirely — go straight to vision
     }
-    
-    // If PDF text extraction got very little, return what we have
-    if (rawText.length > 0) return rawText;
-    throw new Error('Could not extract text from PDF — it may be image-based. Try uploading a .docx or .txt version.');
+
+    if (rawText.length < 50) {
+      throw new Error('Could not extract text from PDF. Try uploading a .docx or .txt version.');
+    }
+
+    // Always use GPT-4o (not mini) for resume text cleanup — accuracy is critical.
+    // The stronger model catches formatting artifacts, reassembles columns, and preserves
+    // all education, certifications, and job details that unpdf may have mangled.
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [{
+            role: 'system',
+            content: `You are a resume text reconstruction expert. You receive raw text extracted from a PDF resume that may have formatting artifacts — jumbled columns, split lines, missing sections, or garbled text.
+
+Your job is to reconstruct the COMPLETE resume text. You MUST include:
+- EVERY job title, company name, date range, and description
+- EVERY degree (Bachelor's, Master's, MBA, PhD, etc.), school name, graduation year, GPA if listed
+- EVERY certification, issuing organization, and date
+- ALL skills, tools, and technologies mentioned
+- ALL other sections (summary, awards, publications, volunteer work, etc.)
+
+CRITICAL: If you see partial text that looks like it could be an education entry (e.g., fragments mentioning "MBA", "Master", "University", "GPA"), reconstruct it fully. PDF column extraction often splits education entries across lines.
+
+Return ONLY the clean, complete resume text. Do not add commentary.`
+          }, {
+            role: 'user',
+            content: rawText.substring(0, 12000)
+          }],
+          max_tokens: 4000
+        })
+      });
+      const data = await res.json();
+      if (data.choices && data.choices[0]) return data.choices[0].message.content;
+    } catch (e) {
+      console.error('GPT-4o cleanup failed:', e.message);
+    }
+
+    // Fall back to raw text if GPT fails
+    return rawText;
   } else {
     // For DOCX and other text formats, try to decode as text
     try {
@@ -2523,6 +2550,40 @@ async function handleAdminStats(url, env, cors) {
   // Basic stats
   const usersIndex = JSON.parse(await env.DATA.get('users_index') || '[]');
   return Response.json({ ok: true, total_users: usersIndex.length }, { headers: cors });
+}
+
+async function handleAdminGetProfile(url, env, cors) {
+  requirePin(url);
+  const userId = url.searchParams.get('user_id');
+  if (!userId) return Response.json({ ok: false, error: 'user_id required' }, { status: 400, headers: cors });
+  const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || 'null');
+  if (!profile) return Response.json({ ok: false, error: 'Profile not found' }, { status: 404, headers: cors });
+  return Response.json({ ok: true, profile }, { headers: cors });
+}
+
+async function handleAdminPatchProfile(url, request, env, cors) {
+  requirePin(url);
+  const userId = url.searchParams.get('user_id');
+  if (!userId) return Response.json({ ok: false, error: 'user_id required' }, { status: 400, headers: cors });
+  const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || 'null');
+  if (!profile) return Response.json({ ok: false, error: 'Profile not found' }, { status: 404, headers: cors });
+  const patch = await request.json();
+  // Deep merge structured_data if provided
+  if (patch.structured_data && profile.structured_data) {
+    for (const [k, v] of Object.entries(patch.structured_data)) {
+      if (Array.isArray(v) && Array.isArray(profile.structured_data[k])) {
+        profile.structured_data[k] = [...profile.structured_data[k], ...v];
+      } else {
+        profile.structured_data[k] = v;
+      }
+    }
+  }
+  // Merge top-level fields
+  for (const [k, v] of Object.entries(patch)) {
+    if (k !== 'structured_data') profile[k] = v;
+  }
+  await env.DATA.put(`profile:${userId}`, JSON.stringify(profile));
+  return Response.json({ ok: true, profile }, { headers: cors });
 }
 
 async function handleAdminInvite(url, request, env, cors) {
