@@ -35628,6 +35628,8 @@ async function route(url, request, env, cors) {
     const jobId = path.split("/api/jobs/")[1].replace("/description", "");
     return handleGetFullDescription(jobId, request, env, cors);
   }
+  if (path === "/api/jobs/search" && method === "POST") return handleJobSearch(request, env, cors);
+  if (path === "/api/jobs/search/analyze" && method === "POST") return handleJobSearchAnalyze(request, env, cors);
   if (path === "/api/admin/seed-jobs" && method === "POST") return handleSeedJobs(env, cors);
   if (path === "/api/admin/sync-jobs" && method === "POST") return handleSyncAdzunaJobs(request, env, cors);
   if (path === "/api/admin/reembed-all" && method === "POST") return handleReembedAll(env, cors);
@@ -36355,6 +36357,124 @@ function cosineSimilarity(a2, b2) {
   const denom = Math.sqrt(normA) * Math.sqrt(normB);
   if (denom === 0) return 0.5;
   return (dot / denom + 1) / 2;
+}
+async function handleJobSearch(request, env, cors) {
+  const userId = await requireAuth(request, env);
+  const body = await request.json();
+  const query = body.query || "";
+  if (!query.trim()) return Response.json({ ok: false, error: "Query required" }, { status: 400, headers: cors });
+  const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || "null");
+  const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
+  let location = body.location || "";
+  if (!location && settings.locations?.length) {
+    location = settings.locations.map((l2) => l2.split(",")[0].trim()).join(" ");
+  }
+  const params = new URLSearchParams({
+    app_id: ADZUNA_APP_ID,
+    app_key: ADZUNA_APP_KEY,
+    results_per_page: "20",
+    what: query,
+    "content-type": "application/json",
+    sort_by: "relevance"
+  });
+  if (location && location !== "Anywhere") params.set("where", location);
+  let adzunaResults = [];
+  try {
+    const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
+    const data = await res.json();
+    adzunaResults = data.results || [];
+  } catch (e2) {
+    return Response.json({ ok: false, error: "Search failed: " + e2.message }, { status: 500, headers: cors });
+  }
+  const results = [];
+  for (const r2 of adzunaResults) {
+    const item = {
+      title: r2.title || "",
+      company: r2.company?.display_name || "Unknown",
+      location: r2.location?.display_name || "",
+      salary_min: r2.salary_min || null,
+      salary_max: r2.salary_max || null,
+      description: (r2.description || "").substring(0, 300),
+      url: r2.redirect_url || "",
+      adzuna_id: String(r2.id),
+      fit_score: null
+    };
+    if (profile && profile.embedding) {
+      try {
+        const embedText = `${item.title} at ${item.company}. ${r2.description || ""}`;
+        const jobEmb = await getEmbedding(env, embedText);
+        const cosine = cosineSimilarity(profile.embedding, jobEmb);
+        item.fit_score = Math.round(cosine * 100);
+      } catch (e2) {
+      }
+    }
+    results.push(item);
+  }
+  results.sort((a2, b2) => (b2.fit_score ?? -1) - (a2.fit_score ?? -1));
+  return Response.json({ ok: true, results, has_profile: !!(profile && profile.embedding) }, { headers: cors });
+}
+async function handleJobSearchAnalyze(request, env, cors) {
+  const userId = await requireAuth(request, env);
+  const body = await request.json();
+  const { adzuna_id, title, company, description, url } = body;
+  if (!title) return Response.json({ ok: false, error: "Title required" }, { status: 400, headers: cors });
+  const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || "null");
+  if (!profile || !profile.structured_data) {
+    return Response.json({ ok: false, error: "No profile found. Upload a resume first." }, { status: 400, headers: cors });
+  }
+  let fullDesc = description || "";
+  if (url) {
+    try {
+      const scraped = await scrapeFullDescription(url);
+      if (scraped && scraped.length > fullDesc.length) fullDesc = scraped;
+    } catch (e2) {
+    }
+  }
+  let structuredReq = null;
+  try {
+    structuredReq = await parseStructuredRequirements(env, title, company, fullDesc);
+  } catch (e2) {
+  }
+  let embedding = null;
+  try {
+    const embText = structuredReq ? buildNormalizedEmbeddingText("job", structuredReq) : `${title} at ${company}. ${fullDesc}`;
+    embedding = await getEmbedding(env, embText);
+  } catch (e2) {
+  }
+  const tempJob = {
+    title,
+    company,
+    location: body.location || "",
+    description: fullDesc,
+    structured_requirements: structuredReq ? JSON.stringify(structuredReq) : null,
+    embedding: embedding ? JSON.stringify(embedding) : null,
+    category: ""
+  };
+  let cosinePct = 50;
+  if (embedding && profile.embedding) {
+    cosinePct = Math.round(cosineSimilarity(profile.embedding, embedding) * 100);
+  }
+  const breakdown = generateBreakdown(profile.structured_data, tempJob, cosinePct);
+  try {
+    const detailed = await generateDetailedBreakdown(env, profile.structured_data, tempJob);
+    Object.assign(breakdown, detailed, { detailed: true });
+    const weights = { skills_match: 0.3, experience_match: 0.3, industry_match: 0.2, education_match: 0.1, leadership_match: 0.1 };
+    let ws2 = 0, tw = 0;
+    for (const [k2, w2] of Object.entries(weights)) {
+      if (breakdown[k2] != null) {
+        ws2 += breakdown[k2] * w2;
+        tw += w2;
+      }
+    }
+    if (tw > 0) breakdown.overall = Math.round(ws2 / tw);
+  } catch (e2) {
+  }
+  return Response.json({
+    ok: true,
+    score: breakdown.overall,
+    breakdown,
+    job: { title, company, location: body.location || "", adzuna_id, url }
+  }, { headers: cors });
 }
 async function handleSeedJobs(env, cors) {
   const sampleJobs = [

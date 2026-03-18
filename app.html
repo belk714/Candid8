@@ -275,9 +275,10 @@
     </div>
     <aside class="sidebar" id="sidebar">
       <div class="logo">candid<span>8</span></div>
-      <div class="nav-item active" data-tab="profile" onclick="switchTab('profile')"><span class="icon">👤</span> Profile</div>
-      <div class="nav-item" data-tab="documents" onclick="switchTab('documents')"><span class="icon">📄</span> Documents</div>
+      <div class="nav-item active" data-tab="profile" onclick="switchTab('profile')"><span class="icon">📊</span> Dashboard</div>
+      <div class="nav-item" data-tab="search" onclick="switchTab('search')"><span class="icon">🔍</span> Search</div>
       <div class="nav-item" data-tab="matches" onclick="switchTab('matches')"><span class="icon">🎯</span> Matches</div>
+      <div class="nav-item" data-tab="documents" onclick="switchTab('documents')"><span class="icon">📄</span> Documents</div>
       <div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span> Settings</div>
       <div class="sidebar-spacer"></div>
       <div class="logout" onclick="logout()">← Log out</div>
@@ -303,6 +304,22 @@
       <div class="tab-content" id="tab-matches" style="display:none">
         <h1>Job Matches</h1>
         <div id="matchesContent"><div class="loading-overlay"><div class="spinner"></div> Loading matches...</div></div>
+      </div>
+      <!-- Search Tab -->
+      <div class="tab-content" id="tab-search" style="display:none">
+        <h1>Search Jobs</h1>
+        <div class="card" style="margin-bottom:20px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <input type="text" id="searchQuery" placeholder="e.g. strategy manager energy" style="flex:1;min-width:200px;padding:14px 18px;border-radius:10px;border:2px solid var(--border);background:var(--surface2);color:var(--text);font-size:1.05rem;font-family:inherit;outline:none;transition:border-color .2s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter')doSearch()">
+            <select id="searchLocation" style="padding:14px 16px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:.95rem;font-family:inherit;outline:none;min-width:160px">
+              <option value="">Anywhere</option>
+            </select>
+            <button class="btn" onclick="doSearch()" style="width:auto;padding:14px 28px;white-space:nowrap">Search</button>
+          </div>
+        </div>
+        <div id="searchResults">
+          <div class="empty-state"><div class="icon">🔍</div><p>Search for jobs by keyword. Results are ranked by how well they match your profile.</p></div>
+        </div>
       </div>
       <!-- Settings Tab -->
       <div class="tab-content" id="tab-settings" style="display:none">
@@ -1132,6 +1149,141 @@
         toast('Failed to save: ' + ex.message, 'error');
       }
     }
+
+    // ── Search ──
+    async function initSearchLocations() {
+      const sel = document.getElementById('searchLocation');
+      if (!sel || sel.options.length > 1) return;
+      await loadLocations();
+      // Add user's saved cities first
+      if (selectedLocations.length) {
+        selectedLocations.forEach(l => { const o = document.createElement('option'); o.value = l.split(',')[0].trim(); o.textContent = l; sel.appendChild(o); });
+        const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '───'; sel.appendChild(sep);
+      }
+      allLocations.filter(l => !selectedLocations.includes(l)).forEach(l => {
+        const o = document.createElement('option'); o.value = l.split(',')[0].trim(); o.textContent = l; sel.appendChild(o);
+      });
+    }
+
+    async function doSearch() {
+      const query = document.getElementById('searchQuery').value.trim();
+      if (!query) return;
+      const location = document.getElementById('searchLocation').value;
+      const el = document.getElementById('searchResults');
+      el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Searching and scoring results...</div>';
+
+      try {
+        const res = await fetch(`${API}/jobs/search`, {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({ query, location })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+
+        if (!data.results.length) {
+          el.innerHTML = '<div class="empty-state"><div class="icon">😕</div><p>No results found. Try different keywords.</p></div>';
+          return;
+        }
+
+        if (!data.has_profile) {
+          el.innerHTML = '<div style="background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:.85rem;color:var(--yellow)">⚠️ Upload your resume first to see fit scores. <a style="color:var(--accent);cursor:pointer" onclick="switchTab(\'documents\')">Go to Documents →</a></div>' + renderSearchResults(data.results);
+        } else {
+          el.innerHTML = renderSearchResults(data.results);
+        }
+      } catch (ex) {
+        el.innerHTML = `<div class="empty-state"><p style="color:var(--red)">Search failed: ${ex.message}</p></div>`;
+      }
+    }
+
+    function renderSearchResults(results) {
+      return results.map(r => {
+        const sc = r.fit_score;
+        const scoreHtml = sc != null
+          ? `<div class="score-badge ${scoreClass(sc)}" title="Cosine similarity estimate">~${sc}%</div>`
+          : `<div class="score-badge" style="color:var(--text-muted);background:var(--surface2);font-size:.9rem">N/A</div>`;
+        const salaryHtml = r.salary_min ? `<div class="salary">${formatSalary(r.salary_min)}${r.salary_max ? ' – ' + formatSalary(r.salary_max) : ''}</div>` : '';
+        const desc = (r.description || '').substring(0, 200) + (r.description?.length > 200 ? '...' : '');
+        return `<div class="match-card" style="cursor:default">
+          <div class="match-header">
+            <div class="match-info">
+              <h3>${r.title}</h3>
+              <div class="company">${r.company}</div>
+              <div class="location">${r.location}</div>
+              ${salaryHtml}
+              <p style="font-size:.83rem;color:var(--text-muted);margin-top:8px">${desc}</p>
+            </div>
+            ${scoreHtml}
+          </div>
+          <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;align-items:center">
+            ${r.url ? `<a href="${r.url}" target="_blank" style="color:var(--accent);font-size:.85rem;text-decoration:none">View Job →</a>` : ''}
+            <button class="btn btn-secondary" style="width:auto;padding:8px 16px;font-size:.83rem" onclick="searchAnalyze(this, ${JSON.stringify(JSON.stringify({adzuna_id:r.adzuna_id,title:r.title,company:r.company,description:r.description,url:r.url}))})">🔍 Detailed Analysis</button>
+          </div>
+          <div class="search-analysis-detail" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"></div>
+        </div>`;
+      }).join('');
+    }
+
+    async function searchAnalyze(btn, jobJson) {
+      const job = JSON.parse(jobJson);
+      const card = btn.closest('.match-card');
+      const detail = card.querySelector('.search-analysis-detail');
+      if (detail.style.display === 'block') { detail.style.display = 'none'; return; }
+      btn.disabled = true; btn.textContent = '⏳ Analyzing...';
+      try {
+        const res = await fetch(`${API}/jobs/search/analyze`, {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify(job)
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        const b = data.breakdown;
+
+        // Update score badge
+        const badge = card.querySelector('.score-badge');
+        if (badge && data.score) {
+          badge.textContent = data.score + '% ✓';
+          badge.title = 'Detailed AI analysis';
+          badge.className = 'score-badge ' + scoreClass(data.score);
+        }
+
+        detail.innerHTML = `
+          ${b.recommendation ? `<div style="background:var(--surface2);border-radius:10px;padding:12px 16px;margin-bottom:16px"><p style="font-size:.9rem;margin:0">💡 ${b.recommendation}</p></div>` : ''}
+          ${breakdownBar('Skills', b.skills_match)}
+          ${b.skills_analysis ? `<p class="analysis-text" style="padding-left:0"><strong>Skills:</strong> ${b.skills_analysis}</p>` : ''}
+          ${b.matched_skills?.length ? `<div style="margin-bottom:4px"><strong style="font-size:.8rem">Matched:</strong> ${b.matched_skills.map(s=>`<span class="tag" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
+          ${b.missing_skills?.length ? `<div style="margin-bottom:8px"><strong style="font-size:.8rem;color:var(--yellow)">Missing:</strong> ${b.missing_skills.map(s=>`<span class="tag" style="font-size:.7rem;opacity:.6">${s}</span>`).join(' ')}</div>` : ''}
+          ${breakdownBar('Experience', b.experience_match)}
+          ${b.experience_analysis ? `<p class="analysis-text" style="padding-left:0">${b.experience_analysis}</p>` : ''}
+          ${breakdownBar('Industry', b.industry_match)}
+          ${b.industry_analysis ? `<p class="analysis-text" style="padding-left:0">${b.industry_analysis}</p>` : ''}
+          ${breakdownBar('Education', b.education_match)}
+          ${b.education_analysis ? `<p class="analysis-text" style="padding-left:0">${b.education_analysis}</p>` : ''}
+          ${b.leadership_match != null ? breakdownBar('Leadership', b.leadership_match) : ''}
+          ${b.leadership_analysis ? `<p class="analysis-text" style="padding-left:0">${b.leadership_analysis}</p>` : ''}
+          ${b.strengths?.length ? `<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">✓ Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.strengths.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
+          ${b.gaps?.length ? `<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">⚠ Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.gaps.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
+          <p style="font-size:.7rem;color:var(--text-muted);margin-top:12px;font-style:italic">✓ Detailed AI analysis</p>
+        `;
+        detail.style.display = 'block';
+        btn.textContent = '🔍 Hide Analysis';
+        btn.disabled = false;
+        btn.onclick = function() {
+          if (detail.style.display === 'block') { detail.style.display = 'none'; btn.textContent = '🔍 Detailed Analysis'; }
+          else { detail.style.display = 'block'; btn.textContent = '🔍 Hide Analysis'; }
+        };
+      } catch (ex) {
+        detail.innerHTML = `<p style="color:var(--red);font-size:.85rem">Analysis failed: ${ex.message}</p>`;
+        detail.style.display = 'block';
+        btn.disabled = false; btn.textContent = '🔍 Detailed Analysis';
+      }
+    }
+
+    // Init search location dropdown when switching to search tab
+    const _origSwitchTab = switchTab;
+    switchTab = function(tab) {
+      _origSwitchTab(tab);
+      if (tab === 'search') initSearchLocations();
+    };
 
     // ── Dashboard Setup Banner ──
     async function checkSetupBanner() {

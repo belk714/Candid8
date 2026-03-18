@@ -428,6 +428,10 @@ async function route(url, request, env, cors) {
     return handleGetFullDescription(jobId, request, env, cors);
   }
 
+  // Job search
+  if (path === '/api/jobs/search' && method === 'POST') return handleJobSearch(request, env, cors);
+  if (path === '/api/jobs/search/analyze' && method === 'POST') return handleJobSearchAnalyze(request, env, cors);
+
   // Admin: seed jobs
   if (path === '/api/admin/seed-jobs' && method === 'POST') return handleSeedJobs(env, cors);
 
@@ -1319,6 +1323,155 @@ function cosineSimilarity(a, b) {
   if (denom === 0) return 0.5;
   // Normalize from [-1,1] to [0,1]
   return (dot / denom + 1) / 2;
+}
+
+// ── Job Search ───────────────────────────────────────────────────────────────
+
+async function handleJobSearch(request, env, cors) {
+  const userId = await requireAuth(request, env);
+  const body = await request.json();
+  const query = body.query || '';
+  if (!query.trim()) return Response.json({ ok: false, error: 'Query required' }, { status: 400, headers: cors });
+
+  // Load user profile for scoring
+  const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || 'null');
+  const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || '{}');
+
+  // Determine location
+  let location = body.location || '';
+  if (!location && settings.locations?.length) {
+    location = settings.locations.map(l => l.split(',')[0].trim()).join(' ');
+  }
+
+  // Call Adzuna
+  const params = new URLSearchParams({
+    app_id: ADZUNA_APP_ID,
+    app_key: ADZUNA_APP_KEY,
+    results_per_page: '20',
+    what: query,
+    'content-type': 'application/json',
+    sort_by: 'relevance'
+  });
+  if (location && location !== 'Anywhere') params.set('where', location);
+
+  let adzunaResults = [];
+  try {
+    const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
+    const data = await res.json();
+    adzunaResults = data.results || [];
+  } catch (e) {
+    return Response.json({ ok: false, error: 'Search failed: ' + e.message }, { status: 500, headers: cors });
+  }
+
+  // Quick-score each result against profile
+  const results = [];
+  for (const r of adzunaResults) {
+    const item = {
+      title: r.title || '',
+      company: r.company?.display_name || 'Unknown',
+      location: r.location?.display_name || '',
+      salary_min: r.salary_min || null,
+      salary_max: r.salary_max || null,
+      description: (r.description || '').substring(0, 300),
+      url: r.redirect_url || '',
+      adzuna_id: String(r.id),
+      fit_score: null
+    };
+
+    if (profile && profile.embedding) {
+      try {
+        const embedText = `${item.title} at ${item.company}. ${r.description || ''}`;
+        const jobEmb = await getEmbedding(env, embedText);
+        const cosine = cosineSimilarity(profile.embedding, jobEmb);
+        item.fit_score = Math.round(cosine * 100);
+      } catch (e) {
+        // Skip scoring for this result
+      }
+    }
+
+    results.push(item);
+  }
+
+  // Sort by fit score (nulls last)
+  results.sort((a, b) => (b.fit_score ?? -1) - (a.fit_score ?? -1));
+
+  return Response.json({ ok: true, results, has_profile: !!(profile && profile.embedding) }, { headers: cors });
+}
+
+async function handleJobSearchAnalyze(request, env, cors) {
+  const userId = await requireAuth(request, env);
+  const body = await request.json();
+  const { adzuna_id, title, company, description, url } = body;
+  if (!title) return Response.json({ ok: false, error: 'Title required' }, { status: 400, headers: cors });
+
+  const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || 'null');
+  if (!profile || !profile.structured_data) {
+    return Response.json({ ok: false, error: 'No profile found. Upload a resume first.' }, { status: 400, headers: cors });
+  }
+
+  // Scrape full description
+  let fullDesc = description || '';
+  if (url) {
+    try {
+      const scraped = await scrapeFullDescription(url);
+      if (scraped && scraped.length > fullDesc.length) fullDesc = scraped;
+    } catch (e) { /* use provided desc */ }
+  }
+
+  // Parse structured requirements
+  let structuredReq = null;
+  try {
+    structuredReq = await parseStructuredRequirements(env, title, company, fullDesc);
+  } catch (e) { /* proceed without */ }
+
+  // Generate embedding
+  let embedding = null;
+  try {
+    const embText = structuredReq
+      ? buildNormalizedEmbeddingText('job', structuredReq)
+      : `${title} at ${company}. ${fullDesc}`;
+    embedding = await getEmbedding(env, embText);
+  } catch (e) { /* proceed without */ }
+
+  // Build a temporary job object for breakdown
+  const tempJob = {
+    title, company, location: body.location || '',
+    description: fullDesc,
+    structured_requirements: structuredReq ? JSON.stringify(structuredReq) : null,
+    embedding: embedding ? JSON.stringify(embedding) : null,
+    category: ''
+  };
+
+  // Cosine score
+  let cosinePct = 50;
+  if (embedding && profile.embedding) {
+    cosinePct = Math.round(cosineSimilarity(profile.embedding, embedding) * 100);
+  }
+
+  // Generate structured breakdown
+  const breakdown = generateBreakdown(profile.structured_data, tempJob, cosinePct);
+
+  // Also run detailed GPT analysis
+  try {
+    const detailed = await generateDetailedBreakdown(env, profile.structured_data, tempJob);
+    Object.assign(breakdown, detailed, { detailed: true });
+    // Recompute weighted score
+    const weights = { skills_match: 0.30, experience_match: 0.30, industry_match: 0.20, education_match: 0.10, leadership_match: 0.10 };
+    let ws = 0, tw = 0;
+    for (const [k, w] of Object.entries(weights)) {
+      if (breakdown[k] != null) { ws += breakdown[k] * w; tw += w; }
+    }
+    if (tw > 0) breakdown.overall = Math.round(ws / tw);
+  } catch (e) {
+    // structured breakdown is still available
+  }
+
+  return Response.json({
+    ok: true,
+    score: breakdown.overall,
+    breakdown,
+    job: { title, company, location: body.location || '', adzuna_id, url }
+  }, { headers: cors });
 }
 
 // ── Seed Jobs ────────────────────────────────────────────────────────────────
