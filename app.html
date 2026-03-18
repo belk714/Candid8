@@ -157,6 +157,7 @@
     .onboarding-step { display: none; animation: fadeIn .3s ease; }
     .onboarding-step.active { display: block; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes progressBar { 0% { width: 0%; } 50% { width: 60%; } 80% { width: 85%; } 100% { width: 95%; } }
     .onboarding-step h2 { font-size: 1.6rem; font-weight: 700; margin-bottom: 12px; }
     .onboarding-step p.sub { color: var(--text-muted); margin-bottom: 28px; font-size: .95rem; }
     .ob-drop-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 40px 20px; cursor: pointer; transition: all .2s; margin-bottom: 20px; }
@@ -806,23 +807,34 @@
 
     async function uploadFile(file) {
       if (!file) return;
-      toast('Uploading ' + file.name + '...');
+      const dropZoneEl = document.getElementById('dropZone');
+      const origHtml = dropZoneEl.innerHTML;
+      dropZoneEl.innerHTML = '<div class="spinner" style="margin:0 auto 12px"></div><p style="color:var(--text-muted)">Uploading <strong>' + file.name + '</strong>...</p>';
+      dropZoneEl.style.pointerEvents = 'none';
       const fd = new FormData();
       fd.append('file', file);
       try {
+        // Show analyzing state after a moment
+        const analyzeTimer = setTimeout(() => {
+          dropZoneEl.innerHTML = '<div class="spinner" style="margin:0 auto 12px"></div><p style="color:var(--text-muted)">Analyzing your resume...</p><p style="font-size:.8rem;color:var(--text-muted)">Extracting skills, experience & building your profile (~30s)</p><div style="margin:16px auto;width:80%;height:4px;background:var(--border);border-radius:4px;overflow:hidden"><div style="height:100%;width:0%;background:var(--accent);border-radius:4px;animation:progressBar 30s ease-out forwards"></div></div>';
+        }, 2000);
         const res = await fetch(`${API}/documents/upload`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` },
           body: fd
         });
+        clearTimeout(analyzeTimer);
         const data = await res.json();
         if (!data.ok) throw new Error(data.error);
+        dropZoneEl.innerHTML = '<div style="font-size:2rem;margin-bottom:8px">✅</div><p style="color:var(--green);font-weight:600">Profile updated!</p>';
+        setTimeout(() => { dropZoneEl.innerHTML = origHtml; dropZoneEl.style.pointerEvents = ''; }, 3000);
         toast('Document uploaded & profile updated!');
         loadDocuments();
-        // Give the profile rebuild a moment
         setTimeout(() => { loadProfile(); }, 1000);
         setTimeout(loadMatches, 3000);
       } catch (ex) {
+        dropZoneEl.innerHTML = origHtml;
+        dropZoneEl.style.pointerEvents = '';
         toast('Upload failed: ' + ex.message, 'error');
       }
     }
