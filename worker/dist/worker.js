@@ -35358,38 +35358,50 @@ var index_default = {
       }
       const seenIds = /* @__PURE__ */ new Set();
       const allJobs = [];
+      const allUserLocations = /* @__PURE__ */ new Set();
+      const usersJsonPh1 = await env.DATA.get("users_index") || "[]";
+      const userIdsPh1 = JSON.parse(usersJsonPh1);
+      for (const uid of userIdsPh1) {
+        const s2 = JSON.parse(await env.DATA.get(`user_settings:${uid}`) || "{}");
+        if (s2.locations?.length) s2.locations.forEach((l2) => allUserLocations.add(l2.split(",")[0].trim()));
+      }
+      const locationList = [...allUserLocations];
+      if (locationList.length === 0) locationList.push("");
       for (const category of BROAD_CATEGORIES) {
-        try {
-          const params = new URLSearchParams({
-            app_id: ADZUNA_APP_ID,
-            app_key: ADZUNA_APP_KEY,
-            results_per_page: "10",
-            what: category,
-            "content-type": "application/json",
-            sort_by: "date"
-          });
-          const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
-          const data = await res.json();
-          if (data.results) {
-            for (const r2 of data.results) {
-              if (seenIds.has(r2.id) || existingAdzunaIds.has(String(r2.id))) continue;
-              seenIds.add(r2.id);
-              allJobs.push({
-                adzuna_id: String(r2.id),
-                title: r2.title || "",
-                company: r2.company?.display_name || "Unknown",
-                location: r2.location?.display_name || "",
-                description: r2.description || "",
-                salary_min: r2.salary_min || null,
-                salary_max: r2.salary_max || null,
-                url: r2.redirect_url || "",
-                category: r2.category?.label || "",
-                created: r2.created || (/* @__PURE__ */ new Date()).toISOString()
-              });
+        for (const loc of locationList) {
+          try {
+            const params = new URLSearchParams({
+              app_id: ADZUNA_APP_ID,
+              app_key: ADZUNA_APP_KEY,
+              results_per_page: "20",
+              what: category,
+              "content-type": "application/json",
+              sort_by: "date"
+            });
+            if (loc) params.set("where", loc);
+            const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
+            const data = await res.json();
+            if (data.results) {
+              for (const r2 of data.results) {
+                if (seenIds.has(r2.id) || existingAdzunaIds.has(String(r2.id))) continue;
+                seenIds.add(r2.id);
+                allJobs.push({
+                  adzuna_id: String(r2.id),
+                  title: r2.title || "",
+                  company: r2.company?.display_name || "Unknown",
+                  location: r2.location?.display_name || "",
+                  description: r2.description || "",
+                  salary_min: r2.salary_min || null,
+                  salary_max: r2.salary_max || null,
+                  url: r2.redirect_url || "",
+                  category: r2.category?.label || "",
+                  created: r2.created || (/* @__PURE__ */ new Date()).toISOString()
+                });
+              }
             }
+          } catch (e2) {
+            console.error(`Cron Phase1: "${category}" in "${loc}" failed:`, e2.message);
           }
-        } catch (e2) {
-          console.error(`Cron Phase1: "${category}" failed:`, e2.message);
         }
       }
       const skipPhase2 = true;
@@ -35617,7 +35629,7 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
         const jobEmb = JSON.parse(job.embedding);
         const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
         const cosinePct = Math.round(cosineScore * 100);
-        if (cosinePct < 45) continue;
+        if (cosinePct < 30) continue;
         if (!job.structured_requirements) {
           try {
             const descText = job.full_description || job.description || "";
@@ -36312,7 +36324,7 @@ async function computeMatches(userId, env, profile) {
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);
-    if (cosinePct < 45) continue;
+    if (cosinePct < 30) continue;
     const matchId = uuid();
     const match = {
       id: matchId,
@@ -37032,12 +37044,12 @@ var ADZUNA_APP_ID = "fadb3c67";
 var ADZUNA_APP_KEY = "640323793fe920a505d836b4088a0201";
 async function handleSyncAdzunaJobs(request, env, cors) {
   let queries = [];
-  let location = "Texas";
-  let perQuery = 5;
+  let locations = [];
+  let perQuery = 10;
   try {
     const body = await request.json();
     if (body.queries) queries = body.queries;
-    if (body.location) location = body.location;
+    if (body.location) locations = [body.location];
     if (body.per_query) perQuery = body.per_query;
     if (body.user_id) {
       const profile = JSON.parse(await env.DATA.get(`profile:${body.user_id}`) || "null");
@@ -37047,44 +37059,57 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     }
   } catch (e2) {
   }
+  if (!locations.length) {
+    const usersJson = await env.DATA.get("users_index") || "[]";
+    const userIds = JSON.parse(usersJson);
+    const locSet = /* @__PURE__ */ new Set();
+    for (const uid of userIds) {
+      const s2 = JSON.parse(await env.DATA.get(`user_settings:${uid}`) || "{}");
+      if (s2.locations?.length) s2.locations.forEach((l2) => locSet.add(l2.split(",")[0].trim()));
+    }
+    locations = [...locSet];
+    if (!locations.length) locations = ["Houston"];
+  }
   if (!queries.length) {
-    queries = ["strategy manager", "digital transformation", "management consulting", "operations manager"];
+    queries = ["strategy manager", "digital transformation", "management consulting", "operations manager", "energy consultant", "program manager", "change management"];
   }
   const seenIds = /* @__PURE__ */ new Set();
   const allJobs = [];
   for (const query of queries) {
-    try {
-      const params = new URLSearchParams({
-        app_id: ADZUNA_APP_ID,
-        app_key: ADZUNA_APP_KEY,
-        results_per_page: String(perQuery),
-        what: query,
-        where: location,
-        "content-type": "application/json",
-        sort_by: "relevance"
-      });
-      const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
-      const data = await res.json();
-      if (data.results) {
-        for (const r2 of data.results) {
-          if (seenIds.has(r2.id)) continue;
-          seenIds.add(r2.id);
-          allJobs.push({
-            adzuna_id: String(r2.id),
-            title: r2.title || "",
-            company: r2.company?.display_name || "Unknown",
-            location: r2.location?.display_name || "",
-            description: r2.description || "",
-            salary_min: r2.salary_min || null,
-            salary_max: r2.salary_max || null,
-            url: r2.redirect_url || "",
-            category: r2.category?.label || "",
-            created: r2.created || (/* @__PURE__ */ new Date()).toISOString()
-          });
+    for (const loc of locations) {
+      try {
+        const params = new URLSearchParams({
+          app_id: ADZUNA_APP_ID,
+          app_key: ADZUNA_APP_KEY,
+          results_per_page: String(perQuery),
+          what: query,
+          "content-type": "application/json",
+          sort_by: "relevance"
+        });
+        if (loc) params.set("where", loc);
+        const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
+        const data = await res.json();
+        if (data.results) {
+          for (const r2 of data.results) {
+            if (seenIds.has(r2.id)) continue;
+            seenIds.add(r2.id);
+            allJobs.push({
+              adzuna_id: String(r2.id),
+              title: r2.title || "",
+              company: r2.company?.display_name || "Unknown",
+              location: r2.location?.display_name || "",
+              description: r2.description || "",
+              salary_min: r2.salary_min || null,
+              salary_max: r2.salary_max || null,
+              url: r2.redirect_url || "",
+              category: r2.category?.label || "",
+              created: r2.created || (/* @__PURE__ */ new Date()).toISOString()
+            });
+          }
         }
+      } catch (e2) {
+        console.error(`Adzuna query "${query}" in "${loc}" failed:`, e2.message);
       }
-    } catch (e2) {
-      console.error(`Adzuna query "${query}" failed:`, e2.message);
     }
   }
   const existingIndexJson = await env.DATA.get("jobs_index") || "[]";
@@ -37098,36 +37123,18 @@ async function handleSyncAdzunaJobs(request, env, cors) {
   const newJobIds = [];
   let embedded = 0;
   let failed = 0;
-  let scraped = 0;
-  let structured = 0;
   for (const j2 of newJobs) {
     const id = uuid();
-    let fullDescription = null;
-    try {
-      fullDescription = await scrapeFullDescription(j2.url);
-      if (fullDescription) scraped++;
-      await new Promise((r2) => setTimeout(r2, 500));
-    } catch (e2) {
-      console.error("Scrape error for:", j2.title, e2.message);
-    }
-    const descriptionForEmbedding = fullDescription || j2.description;
-    let structuredReqs = null;
-    try {
-      structuredReqs = await parseStructuredRequirements(env, j2.title, j2.company, descriptionForEmbedding);
-      if (structuredReqs) structured++;
-    } catch (e2) {
-      console.error("Structured parse error for:", j2.title, e2.message);
-    }
     let embedding = null;
     try {
-      const embText = structuredReqs ? buildNormalizedEmbeddingText("job", structuredReqs) : `${j2.title} at ${j2.company}. ${descriptionForEmbedding}`;
+      const embText = `${j2.title} at ${j2.company}. ${j2.location}. ${j2.category}. ${j2.description}`;
       embedding = await getEmbedding(env, embText);
       embedded++;
     } catch (e2) {
       failed++;
       console.error("Embedding failed for:", j2.title, e2.message);
       if (e2.message && e2.message.includes("rate")) {
-        await new Promise((r2) => setTimeout(r2, 1e3));
+        await new Promise((r2) => setTimeout(r2, 500));
       }
     }
     const job = {
@@ -37137,8 +37144,8 @@ async function handleSyncAdzunaJobs(request, env, cors) {
       company: j2.company,
       location: j2.location,
       description: j2.description,
-      full_description: fullDescription || null,
-      structured_requirements: structuredReqs ? JSON.stringify(structuredReqs) : null,
+      full_description: null,
+      structured_requirements: null,
       salary_min: j2.salary_min,
       salary_max: j2.salary_max,
       url: j2.url,
@@ -37176,8 +37183,6 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     new_jobs: newJobIds.length,
     duplicates_skipped: allJobs.length - newJobs.length,
     new_embedded: embedded,
-    new_scraped: scraped,
-    new_structured: structured,
     backfilled,
     queries_used: queries.length
   }, { headers: cors });

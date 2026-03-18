@@ -950,6 +950,7 @@
           // Clear old content except full-desc details and job link
           const details = quickView.querySelector('details');
           const link = quickView.querySelector('a[target="_blank"]');
+          const saveBtn = card.querySelector(`[id^="save-btn-"]`);
           quickView.innerHTML = `
             ${b.recommendation ? `<p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">💡 ${b.recommendation}</p>` : ''}
             ${breakdownBar('Skills', b.skills_match)}
@@ -963,7 +964,9 @@
             ${b.strengths?.length ? '<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">✓ Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.strengths.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
             ${b.gaps?.length ? '<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">⚠ Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.gaps.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
           `;
-          // Re-add full description details and link
+          // Re-add save button, full description details, and link
+          if (saveBtn) quickView.appendChild(saveBtn);
+          else quickView.insertAdjacentHTML('beforeend', `<button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px;margin-top:8px" onclick="event.stopPropagation();saveJob('${jobId}')" id="save-btn-${jobId}">⭐ Save</button>`);
           if (details) quickView.appendChild(details);
           if (link) quickView.appendChild(link);
         }

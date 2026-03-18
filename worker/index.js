@@ -51,17 +51,30 @@ export default {
       const seenIds = new Set();
       const allJobs = [];
 
-      // ── Phase 1: Broad category-based ingestion ──
+      // Gather all user locations for Phase 1 location targeting
+      const allUserLocations = new Set();
+      const usersJsonPh1 = await env.DATA.get('users_index') || '[]';
+      const userIdsPh1 = JSON.parse(usersJsonPh1);
+      for (const uid of userIdsPh1) {
+        const s = JSON.parse(await env.DATA.get(`user_settings:${uid}`) || '{}');
+        if (s.locations?.length) s.locations.forEach(l => allUserLocations.add(l.split(',')[0].trim()));
+      }
+      const locationList = [...allUserLocations];
+      if (locationList.length === 0) locationList.push(''); // no filter if no users have locations
+
+      // ── Phase 1: Broad category-based ingestion (per location) ──
       for (const category of BROAD_CATEGORIES) {
+        for (const loc of locationList) {
         try {
           const params = new URLSearchParams({
             app_id: ADZUNA_APP_ID,
             app_key: ADZUNA_APP_KEY,
-            results_per_page: '10',
+            results_per_page: '20',
             what: category,
             'content-type': 'application/json',
             sort_by: 'date'
           });
+          if (loc) params.set('where', loc);
           const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
           const data = await res.json();
           if (data.results) {
@@ -83,8 +96,9 @@ export default {
             }
           }
         } catch (e) {
-          console.error(`Cron Phase1: "${category}" failed:`, e.message);
+          console.error(`Cron Phase1: "${category}" in "${loc}" failed:`, e.message);
         }
+        } // end location loop
       }
 
       // ── Phase 2: Profile-specific queries (disabled for performance — broad categories cover most roles) ──
@@ -361,7 +375,7 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
         const jobEmb = JSON.parse(job.embedding);
         const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
         const cosinePct = Math.round(cosineScore * 100);
-        if (cosinePct < 45) continue;
+        if (cosinePct < 30) continue;
 
         // Lazy parse structured requirements if missing
         if (!job.structured_requirements) {
@@ -1257,7 +1271,7 @@ async function computeMatches(userId, env, profile) {
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);
-    if (cosinePct < 45) continue;
+    if (cosinePct < 30) continue;
 
     // 3. Store as a candidate match (no score yet — user clicks "Analyze Fit" or alert engine scores it)
     const matchId = uuid();
@@ -2204,16 +2218,15 @@ const ADZUNA_APP_KEY = '640323793fe920a505d836b4088a0201';
 
 async function handleSyncAdzunaJobs(request, env, cors) {
   let queries = [];
-  let location = 'Texas';
-  let perQuery = 5;
+  let locations = [];
+  let perQuery = 10;
   
   try {
     const body = await request.json();
     if (body.queries) queries = body.queries;
-    if (body.location) location = body.location;
+    if (body.location) locations = [body.location];
     if (body.per_query) perQuery = body.per_query;
     if (body.user_id) {
-      // Auto-generate queries from user profile
       const profile = JSON.parse(await env.DATA.get(`profile:${body.user_id}`) || 'null');
       if (profile && profile.structured_data && (!queries || !queries.length)) {
         queries = await generateSearchQueries(env, profile.structured_data);
@@ -2221,24 +2234,38 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     }
   } catch (e) { /* use defaults */ }
 
+  // If no locations provided, gather from all users
+  if (!locations.length) {
+    const usersJson = await env.DATA.get('users_index') || '[]';
+    const userIds = JSON.parse(usersJson);
+    const locSet = new Set();
+    for (const uid of userIds) {
+      const s = JSON.parse(await env.DATA.get(`user_settings:${uid}`) || '{}');
+      if (s.locations?.length) s.locations.forEach(l => locSet.add(l.split(',')[0].trim()));
+    }
+    locations = [...locSet];
+    if (!locations.length) locations = ['Houston'];
+  }
+
   if (!queries.length) {
-    queries = ['strategy manager', 'digital transformation', 'management consulting', 'operations manager'];
+    queries = ['strategy manager', 'digital transformation', 'management consulting', 'operations manager', 'energy consultant', 'program manager', 'change management'];
   }
 
   const seenIds = new Set();
   const allJobs = [];
 
   for (const query of queries) {
+    for (const loc of locations) {
     try {
       const params = new URLSearchParams({
         app_id: ADZUNA_APP_ID,
         app_key: ADZUNA_APP_KEY,
         results_per_page: String(perQuery),
         what: query,
-        where: location,
         'content-type': 'application/json',
         sort_by: 'relevance'
       });
+      if (loc) params.set('where', loc);
       const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
       const data = await res.json();
       
@@ -2261,8 +2288,9 @@ async function handleSyncAdzunaJobs(request, env, cors) {
         }
       }
     } catch (e) {
-      console.error(`Adzuna query "${query}" failed:`, e.message);
+      console.error(`Adzuna query "${query}" in "${loc}" failed:`, e.message);
     }
+    } // end location loop
   }
 
   // Load existing jobs index and build adzuna_id lookup
@@ -2277,51 +2305,26 @@ async function handleSyncAdzunaJobs(request, env, cors) {
   // Filter out duplicates
   const newJobs = allJobs.filter(j => !existingAdzunaIds.has(j.adzuna_id));
 
-  // Store new jobs with full descriptions, structured requirements, and embeddings
+  // Store new jobs fast: embed with Adzuna description only (no scraping, no GPT parsing)
+  // Scraping + structured parsing happen lazily on "Analyze Fit" click
   const newJobIds = [];
   let embedded = 0;
   let failed = 0;
-  let scraped = 0;
-  let structured = 0;
   
   for (const j of newJobs) {
     const id = uuid();
 
-    // 1. Scrape full description from redirect_url
-    let fullDescription = null;
-    try {
-      fullDescription = await scrapeFullDescription(j.url);
-      if (fullDescription) scraped++;
-      // Small delay to avoid rate limiting
-      await new Promise(r => setTimeout(r, 500));
-    } catch (e) {
-      console.error('Scrape error for:', j.title, e.message);
-    }
-
-    const descriptionForEmbedding = fullDescription || j.description;
-
-    // 2. Parse structured requirements via GPT-4o-mini
-    let structuredReqs = null;
-    try {
-      structuredReqs = await parseStructuredRequirements(env, j.title, j.company, descriptionForEmbedding);
-      if (structuredReqs) structured++;
-    } catch (e) {
-      console.error('Structured parse error for:', j.title, e.message);
-    }
-
-    // 3. Generate embedding using normalized format if structured reqs available
+    // Quick embedding from title + company + Adzuna snippet
     let embedding = null;
     try {
-      const embText = structuredReqs
-        ? buildNormalizedEmbeddingText('job', structuredReqs)
-        : `${j.title} at ${j.company}. ${descriptionForEmbedding}`;
+      const embText = `${j.title} at ${j.company}. ${j.location}. ${j.category}. ${j.description}`;
       embedding = await getEmbedding(env, embText);
       embedded++;
     } catch (e) {
       failed++;
       console.error('Embedding failed for:', j.title, e.message);
       if (e.message && e.message.includes('rate')) {
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 500));
       }
     }
 
@@ -2332,8 +2335,8 @@ async function handleSyncAdzunaJobs(request, env, cors) {
       company: j.company,
       location: j.location,
       description: j.description,
-      full_description: fullDescription || null,
-      structured_requirements: structuredReqs ? JSON.stringify(structuredReqs) : null,
+      full_description: null,
+      structured_requirements: null,
       salary_min: j.salary_min,
       salary_max: j.salary_max,
       url: j.url,
@@ -2379,8 +2382,6 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     new_jobs: newJobIds.length,
     duplicates_skipped: allJobs.length - newJobs.length,
     new_embedded: embedded,
-    new_scraped: scraped,
-    new_structured: structured,
     backfilled: backfilled,
     queries_used: queries.length
   }, { headers: cors });
