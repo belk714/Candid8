@@ -483,6 +483,14 @@ async function route(url, request, env, cors) {
   // Alerts
   if (path === '/api/alerts' && method === 'GET') return handleGetAlerts(request, env, cors);
 
+  // Saved jobs
+  if (path === '/api/saved-jobs' && method === 'GET') return handleGetSavedJobs(request, env, cors);
+  if (path === '/api/saved-jobs' && method === 'POST') return handleSaveJob(request, env, cors);
+  if (path.startsWith('/api/saved-jobs/') && method === 'DELETE') {
+    const jobId = path.split('/api/saved-jobs/')[1];
+    return handleUnsaveJob(request, env, cors, jobId);
+  }
+
   // Job locations for autocomplete
   if (path === '/api/jobs/locations' && method === 'GET') return handleGetJobLocations(env, cors);
 
@@ -906,6 +914,72 @@ async function handleUpdateSettings(request, env, cors) {
   await env.DATA.put(`user_settings:${userId}`, JSON.stringify(settings));
   const warning = locations.length === 0 ? 'No cities set — alerts won\'t fire without at least one location.' : null;
   return Response.json({ ok: true, settings, warning }, { headers: cors });
+}
+
+// ── Saved Jobs ──────────────────────────────────────────────────────────────
+
+async function handleGetSavedJobs(request, env, cors) {
+  const userId = await requireAuth(request, env);
+  const savedJson = await env.DATA.get(`saved_jobs:${userId}`) || '[]';
+  const savedJobIds = JSON.parse(savedJson);
+  
+  const jobs = [];
+  for (const jobId of savedJobIds) {
+    const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
+    if (!job) continue;
+    
+    // Find match data if exists
+    const matchesJson = await env.DATA.get(`user_matches:${userId}`) || '[]';
+    const matchIds = JSON.parse(matchesJson);
+    let matchData = null;
+    for (const mid of matchIds) {
+      const m = JSON.parse(await env.DATA.get(`match:${mid}`) || 'null');
+      if (m && m.job_id === jobId) {
+        matchData = { score: m.score, breakdown: JSON.parse(m.breakdown || '{}') };
+        break;
+      }
+    }
+    
+    jobs.push({
+      id: job.id,
+      title: job.title,
+      company: job.company,
+      location: job.location,
+      salary_min: job.salary_min,
+      salary_max: job.salary_max,
+      url: job.url,
+      score: matchData?.score || null,
+      breakdown: matchData?.breakdown || null,
+      saved_at: null
+    });
+  }
+  
+  return Response.json({ ok: true, jobs }, { headers: cors });
+}
+
+async function handleSaveJob(request, env, cors) {
+  const userId = await requireAuth(request, env);
+  const body = await request.json();
+  const jobId = body.job_id;
+  if (!jobId) return Response.json({ ok: false, error: 'job_id required' }, { status: 400, headers: cors });
+  
+  const savedJson = await env.DATA.get(`saved_jobs:${userId}`) || '[]';
+  const saved = JSON.parse(savedJson);
+  if (!saved.includes(jobId)) {
+    saved.unshift(jobId);
+    await env.DATA.put(`saved_jobs:${userId}`, JSON.stringify(saved));
+  }
+  
+  return Response.json({ ok: true }, { headers: cors });
+}
+
+async function handleUnsaveJob(request, env, cors, jobId) {
+  const userId = await requireAuth(request, env);
+  const savedJson = await env.DATA.get(`saved_jobs:${userId}`) || '[]';
+  const saved = JSON.parse(savedJson).filter(id => id !== jobId);
+  await env.DATA.put(`saved_jobs:${userId}`, JSON.stringify(saved));
+  
+  return Response.json({ ok: true }, { headers: cors });
 }
 
 // ── Alerts ───────────────────────────────────────────────────────────────────

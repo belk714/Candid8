@@ -304,6 +304,7 @@
       <div class="nav-item active" data-tab="profile" onclick="switchTab('profile')"><span class="icon">📊</span> Dashboard</div>
       <div class="nav-item" data-tab="search" onclick="switchTab('search')"><span class="icon">🔍</span> Search</div>
       <div class="nav-item" data-tab="matches" onclick="switchTab('matches')"><span class="icon">🎯</span> Matches</div>
+      <div class="nav-item" data-tab="saved" onclick="switchTab('saved')"><span class="icon">⭐</span> Saved Jobs</div>
       <div class="nav-item" data-tab="documents" onclick="switchTab('documents')"><span class="icon">📄</span> Documents</div>
       <div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span> Settings</div>
       <div class="sidebar-spacer"></div>
@@ -330,6 +331,11 @@
       <div class="tab-content" id="tab-matches" style="display:none">
         <h1>Job Matches</h1>
         <div id="matchesContent"><div class="loading-overlay"><div class="spinner"></div> Loading matches...</div></div>
+      </div>
+      <!-- Saved Jobs Tab -->
+      <div class="tab-content" id="tab-saved" style="display:none">
+        <h1>Saved Jobs</h1>
+        <div id="savedContent"><div class="empty-state"><p>No saved jobs yet. Save jobs from your matches or search results.</p></div></div>
       </div>
       <!-- Search Tab -->
       <div class="tab-content" id="tab-search" style="display:none">
@@ -608,6 +614,7 @@
       document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
       document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
       if (window.innerWidth < 769) toggleSidebar();
+      if (tab === 'saved') loadSavedJobs();
     }
 
     function toggleSidebar() {
@@ -858,7 +865,10 @@
                     <summary style="cursor:pointer;font-size:.85rem;color:var(--accent)">📄 Full Job Description</summary>
                     <div class="full-desc" style="font-size:.8rem;color:var(--text-muted);margin-top:8px;white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:12px;background:var(--surface2);border-radius:8px"><div class="spinner" style="margin:8px auto"></div></div>
                   </details>
-                  ${m.job.url ? `<a href="${m.job.url}" target="_blank" onclick="event.stopPropagation()" style="display:inline-block;margin-bottom:12px;color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
+                  <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
+                    ${m.job.url ? `<a href="${m.job.url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
+                    <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px" onclick="event.stopPropagation();saveJob('${m.job.id}')" id="save-btn-${m.job.id}">⭐ Save</button>
+                  </div>
                   ${!isDetailed ? `<button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">🔍 Analyze Fit</button>` : ''}
                   <div id="detailed-${m.job.id}"></div>
                 </div>
@@ -955,6 +965,81 @@
       if (val == null) return '';
       const v = Math.max(0, Math.min(100, val));
       return `<div class="breakdown-bar"><span class="breakdown-label">${label}</span><div class="breakdown-track"><div class="breakdown-fill" style="width:${v}%;background:${barColor(v)}"></div></div><span class="breakdown-val">${v}%</span></div>`;
+    }
+
+    // ── Saved Jobs ──
+    let savedJobIds = new Set();
+
+    async function loadSavedJobs() {
+      const el = document.getElementById('savedContent');
+      el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Loading saved jobs...</div>';
+      try {
+        const res = await fetch(`${API}/saved-jobs`, { headers: authHeaders() });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        savedJobIds = new Set(data.jobs.map(j => j.id));
+        if (!data.jobs.length) {
+          el.innerHTML = '<div class="empty-state"><p>No saved jobs yet. Save jobs from your matches or search results.</p></div>';
+          return;
+        }
+        el.innerHTML = data.jobs.map(j => {
+          const hasScore = j.score != null && j.breakdown?.detailed;
+          return `
+            <div class="match-card">
+              <div class="match-header">
+                <div class="match-info">
+                  <h3>${j.title}</h3>
+                  <div class="company">${j.company}</div>
+                  <div class="location">${j.location}</div>
+                  ${j.salary_min ? `<div class="salary">${formatSalary(j.salary_min)} – ${formatSalary(j.salary_max)}</div>` : ''}
+                </div>
+                ${hasScore ? `<div class="score-badge ${scoreClass(j.score)}">${j.score}%</div>` : ''}
+              </div>
+              <div style="display:flex;gap:12px;align-items:center;margin-top:12px">
+                ${j.url ? `<a href="${j.url}" target="_blank" style="color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
+                <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px;color:var(--red)" onclick="unsaveJob('${j.id}')">✕ Remove</button>
+              </div>
+            </div>`;
+        }).join('');
+      } catch (ex) {
+        el.innerHTML = '<div class="empty-state"><p>Failed to load saved jobs.</p></div>';
+      }
+    }
+
+    async function saveJob(jobId) {
+      try {
+        const res = await fetch(`${API}/saved-jobs`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ job_id: jobId })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          savedJobIds.add(jobId);
+          const btn = document.getElementById(`save-btn-${jobId}`);
+          if (btn) { btn.textContent = '✓ Saved'; btn.disabled = true; btn.style.opacity = '.6'; }
+          toast('Job saved!');
+        }
+      } catch (ex) {
+        toast('Failed to save job', 'error');
+      }
+    }
+
+    async function unsaveJob(jobId) {
+      try {
+        const res = await fetch(`${API}/saved-jobs/${jobId}`, {
+          method: 'DELETE',
+          headers: authHeaders()
+        });
+        const data = await res.json();
+        if (data.ok) {
+          savedJobIds.delete(jobId);
+          toast('Job removed');
+          loadSavedJobs();
+        }
+      } catch (ex) {
+        toast('Failed to remove job', 'error');
+      }
     }
 
     // ── Settings ──
