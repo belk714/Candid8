@@ -1398,10 +1398,7 @@
 
     function renderSearchResults(results) {
       return results.map(r => {
-        const sc = r.fit_score;
-        const scoreHtml = sc != null
-          ? `<div class="score-badge ${scoreClass(sc)}" title="Cosine similarity estimate">~${sc}%</div>`
-          : `<div class="score-badge" style="color:var(--text-muted);background:var(--surface2);font-size:.9rem">N/A</div>`;
+        const scoreHtml = '';
         const salaryHtml = r.salary_min ? `<div class="salary">${formatSalary(r.salary_min)}${r.salary_max ? ' – ' + formatSalary(r.salary_max) : ''}</div>` : '';
         const desc = (r.description || '').substring(0, 200) + (r.description?.length > 200 ? '...' : '');
         return `<div class="match-card" style="cursor:default">
