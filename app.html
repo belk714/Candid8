@@ -314,24 +314,23 @@
     </div>
     <aside class="sidebar" id="sidebar">
       <div class="logo">candid<span>8</span></div>
-      <div class="nav-item active" data-tab="profile" onclick="switchTab('profile')"><span class="icon">📊</span> Dashboard</div>
-      <div class="nav-item" data-tab="search" onclick="switchTab('search')"><span class="icon">🔍</span> Search</div>
+      <div class="nav-item active" data-tab="documents" onclick="switchTab('documents')"><span class="icon">📄</span> Documents</div>
+      <div class="nav-item" data-tab="profile" onclick="switchTab('profile')"><span class="icon">📊</span> Profile</div>
       <div class="nav-item" data-tab="matches" onclick="switchTab('matches')"><span class="icon">🎯</span> Matches</div>
+      <div class="nav-item" data-tab="search" onclick="switchTab('search')"><span class="icon">🔍</span> Search</div>
       <div class="nav-item" data-tab="saved" onclick="switchTab('saved')"><span class="icon">⭐</span> Saved Jobs</div>
-      <div class="nav-item" data-tab="documents" onclick="switchTab('documents')"><span class="icon">📄</span> Documents</div>
-      <div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span> Settings</div>
       <div class="sidebar-spacer"></div>
       <div class="logout" onclick="logout()">← Log out</div>
     </aside>
     <main class="main">
       <div class="setup-banner" id="setupBanner"></div>
       <!-- Profile Tab -->
-      <div class="tab-content" id="tab-profile">
+      <div class="tab-content" id="tab-profile" style="display:none">
         <h1>Your Profile</h1>
         <div id="profileContent"><div class="loading-overlay"><div class="spinner"></div> Loading profile...</div></div>
       </div>
       <!-- Documents Tab -->
-      <div class="tab-content" id="tab-documents" style="display:none">
+      <div class="tab-content" id="tab-documents">
         <h1>Documents</h1>
         <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
           <div style="font-size:2rem">📁</div>
@@ -343,6 +342,52 @@
       <!-- Matches Tab -->
       <div class="tab-content" id="tab-matches" style="display:none">
         <h1>Job Matches</h1>
+        <!-- Filters -->
+        <div class="card" style="margin-bottom:20px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h3 style="margin:0">Filters & Alerts</h3>
+            <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px" onclick="toggleMatchFilters()">⚙️ Edit</button>
+          </div>
+          <div id="matchFilterSummary" style="font-size:.85rem;color:var(--text-muted)">Loading...</div>
+          <div id="matchFilterForm" style="display:none;margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
+            <div class="form-group" style="margin-bottom:12px">
+              <label>📍 Cities (max 3) <span style="font-size:.75rem;color:var(--yellow)">★ Required for alerts</span></label>
+              <div id="matchLocationTags" class="tags" style="margin-bottom:8px"></div>
+              <div style="position:relative">
+                <input type="text" id="matchLocInput" placeholder="Type a major city..." autocomplete="off" oninput="filterMatchLocations()" onfocus="filterMatchLocations()">
+                <div id="matchLocDropdown" class="loc-dropdown" style="display:none"></div>
+              </div>
+            </div>
+            <div style="display:flex;gap:12px;margin-bottom:12px">
+              <div class="form-group" style="flex:1;margin:0">
+                <label style="font-size:.85rem">💰 Min Salary ($)</label>
+                <input type="number" id="matchSalMin" placeholder="e.g. 120000">
+              </div>
+              <div class="form-group" style="flex:1;margin:0">
+                <label style="font-size:.85rem">💰 Max Salary ($)</label>
+                <input type="number" id="matchSalMax" placeholder="e.g. 200000">
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                <input type="checkbox" id="matchAlertsEnabled" checked style="width:auto;accent-color:var(--accent)">
+                <span>🔔 Enable email alerts</span>
+              </label>
+            </div>
+            <div class="form-group" style="margin-bottom:12px">
+              <label style="font-size:.85rem">Minimum fit score for alerts: <strong id="matchThreshVal">75</strong>%</label>
+              <input type="range" id="matchAlertThreshold" min="60" max="100" step="5" value="75" oninput="document.getElementById('matchThreshVal').textContent=this.value" style="width:100%">
+            </div>
+            <div class="form-group" style="margin-bottom:16px">
+              <label style="font-size:.85rem">Alert email</label>
+              <input type="email" id="matchAlertEmail" placeholder="defaults to your signup email">
+            </div>
+            <button class="btn" onclick="saveMatchFilters()" style="width:100%">Save Filters</button>
+          </div>
+        </div>
+        <!-- Find Jobs Button -->
+        <button class="btn" id="findJobsBtn" onclick="triggerJobSync()" style="width:100%;margin-bottom:20px;padding:14px;font-size:1rem">🔍 Find New Jobs</button>
+        <!-- Job List -->
         <div id="matchesContent"><div class="loading-overlay"><div class="spinner"></div> Loading matches...</div></div>
       </div>
       <!-- Saved Jobs Tab -->
@@ -366,70 +411,7 @@
           <div class="empty-state"><div class="icon">🔍</div><p>Search for jobs by keyword. Results are ranked by how well they match your profile.</p></div>
         </div>
       </div>
-      <!-- Settings Tab -->
-      <div class="tab-content" id="tab-settings" style="display:none">
-        <h1>Settings</h1>
-        <div class="card">
-          <h3>Preferences</h3>
-          <form class="settings-form" onsubmit="saveSettings(event)">
-            <div class="form-group">
-              <label>Preferred Locations <span style="font-size:.75rem;color:var(--yellow)">★ Required for alerts</span></label>
-              <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:8px">Set your preferred cities — only jobs in these locations (+ Remote if selected) will be matched. Max 3 cities.</p>
-              <div class="location-picker">
-                <div id="locationTags" class="tags" style="margin-bottom:8px"></div>
-                <div style="position:relative">
-                  <input type="text" id="settLocInput" placeholder="Type a major city..." autocomplete="off" oninput="filterLocations()" onfocus="filterLocations()">
-                  <div id="locDropdown" class="loc-dropdown" style="display:none"></div>
-                </div>
-                <p id="locMaxNote" style="display:none;font-size:.75rem;color:var(--yellow);margin-top:4px">Maximum 3 cities</p>
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Radius (miles): <span id="radiusVal">50</span></label>
-              <input type="range" id="settRadius" min="10" max="200" step="10" value="50" oninput="document.getElementById('radiusVal').textContent=this.value" style="width:100%">
-            </div>
-            <div class="row">
-              <div class="form-group">
-                <label>Min Salary ($)</label>
-                <input type="number" id="settSalMin" placeholder="100000">
-              </div>
-              <div class="form-group">
-                <label>Max Salary ($)</label>
-                <input type="number" id="settSalMax" placeholder="200000">
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Industries (comma-separated)</label>
-              <input type="text" id="settIndustries" placeholder="Tech, Finance, Healthcare">
-            </div>
-            <button type="submit" class="btn">Save Preferences</button>
-          </form>
-        </div>
-        <div class="card" style="margin-top:20px">
-          <h3>🔔 Job Alerts</h3>
-          <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:16px">Get emailed when new jobs match your profile. Requires at least 1 city selected and a resume uploaded.</p>
-          <div class="form-group" style="margin-bottom:16px">
-            <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-              <input type="checkbox" id="settAlertsEnabled" checked style="width:auto;accent-color:var(--accent)">
-              <span>Enable job alerts</span>
-            </label>
-          </div>
-          <div class="form-group" style="margin-bottom:16px">
-            <label>Minimum fit score for alerts: <strong id="thresholdVal">75</strong>%</label>
-            <input type="range" id="settAlertThreshold" min="60" max="100" step="5" value="75" oninput="document.getElementById('thresholdVal').textContent=this.value" style="width:100%">
-          </div>
-          <div class="form-group" style="margin-bottom:16px">
-            <label>Alert email</label>
-            <input type="email" id="settAlertEmail" placeholder="defaults to your signup email" class="settings-form">
-            <p style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Leave blank to use your account email</p>
-          </div>
-          <button class="btn" onclick="saveAlertSettings()" style="width:100%">Save Alert Settings</button>
-        </div>
-        <div class="card" style="margin-top:20px">
-          <h3>📬 Recent Alerts</h3>
-          <div id="alertHistory" style="color:var(--text-muted);font-size:.9rem">Loading...</div>
-        </div>
-      </div>
+      <!-- Settings tab removed — merged into Matches -->
     </main>
   </div>
 
@@ -616,7 +598,7 @@
       loadProfile();
       loadDocuments();
       loadMatches();
-      loadSettings();
+      loadLocations();
       checkSetupBanner();
     }
 
@@ -628,6 +610,7 @@
       document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
       if (window.innerWidth < 769) toggleSidebar();
       if (tab === 'saved') loadSavedJobs();
+      if (tab === 'matches') loadMatchFilters();
     }
 
     function toggleSidebar() {
@@ -996,6 +979,105 @@
       return `<div class="breakdown-bar"><span class="breakdown-label">${label}</span><div class="breakdown-track"><div class="breakdown-fill" style="width:${v}%;background:${barColor(v)}"></div></div><span class="breakdown-val">${v}%</span></div>`;
     }
 
+    // ── Match Filters ──
+    let matchFilterCities = [];
+
+    function toggleMatchFilters() {
+      const form = document.getElementById('matchFilterForm');
+      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function updateMatchFilterSummary(settings) {
+      const el = document.getElementById('matchFilterSummary');
+      const cities = (settings.locations || []).join(', ') || 'None set';
+      const salary = settings.salary_min ? '$' + (settings.salary_min/1000).toFixed(0) + 'k' + (settings.salary_max ? ' – $' + (settings.salary_max/1000).toFixed(0) + 'k' : '+') : 'Any';
+      const alerts = settings.alerts_enabled !== false ? '🔔 On (' + (settings.alert_threshold || 75) + '%+)' : '🔕 Off';
+      el.innerHTML = '📍 ' + cities + ' &nbsp;|&nbsp; 💰 ' + salary + ' &nbsp;|&nbsp; ' + alerts;
+    }
+
+    async function loadMatchFilters() {
+      try {
+        const res = await fetch(`${API}/settings`, { headers: authHeaders() });
+        const data = await res.json();
+        if (!data.ok) return;
+        const s = data.settings;
+        updateMatchFilterSummary(s);
+        matchFilterCities = s.locations || [];
+        renderMatchLocationTags();
+        document.getElementById('matchSalMin').value = s.salary_min || '';
+        document.getElementById('matchSalMax').value = s.salary_max || '';
+        document.getElementById('matchAlertsEnabled').checked = s.alerts_enabled !== false;
+        document.getElementById('matchAlertThreshold').value = s.alert_threshold || 75;
+        document.getElementById('matchThreshVal').textContent = s.alert_threshold || 75;
+        document.getElementById('matchAlertEmail').value = s.alert_email || '';
+      } catch(e) {}
+    }
+
+    function renderMatchLocationTags() {
+      const el = document.getElementById('matchLocationTags');
+      el.innerHTML = matchFilterCities.map(c => '<span class="tag" style="cursor:pointer" onclick="removeMatchCity(this,\'' + c.replace(/'/g,"\\'") + '\')">' + c + ' ✕</span>').join('');
+    }
+
+    function removeMatchCity(el, city) {
+      matchFilterCities = matchFilterCities.filter(c => c !== city);
+      renderMatchLocationTags();
+    }
+
+    function filterMatchLocations() {
+      const input = document.getElementById('matchLocInput');
+      const dropdown = document.getElementById('matchLocDropdown');
+      const val = input.value.toLowerCase();
+      if (!val || matchFilterCities.length >= 3) { dropdown.style.display = 'none'; return; }
+      const filtered = allLocations.filter(l => l.toLowerCase().includes(val) && !matchFilterCities.includes(l)).slice(0, 8);
+      if (!filtered.length) { dropdown.style.display = 'none'; return; }
+      dropdown.innerHTML = filtered.map(l => '<div class="loc-option" onclick="addMatchCity(\'' + l.replace(/'/g,"\\'") + '\')">' + l + '</div>').join('');
+      dropdown.style.display = 'block';
+    }
+
+    function addMatchCity(city) {
+      if (matchFilterCities.length >= 3 || matchFilterCities.includes(city)) return;
+      matchFilterCities.push(city);
+      renderMatchLocationTags();
+      document.getElementById('matchLocInput').value = '';
+      document.getElementById('matchLocDropdown').style.display = 'none';
+    }
+
+    async function saveMatchFilters() {
+      try {
+        const body = {
+          locations: matchFilterCities,
+          salary_min: parseInt(document.getElementById('matchSalMin').value) || 0,
+          salary_max: parseInt(document.getElementById('matchSalMax').value) || 0,
+          alerts_enabled: document.getElementById('matchAlertsEnabled').checked,
+          alert_threshold: parseInt(document.getElementById('matchAlertThreshold').value) || 75,
+          alert_email: document.getElementById('matchAlertEmail').value.trim()
+        };
+        const res = await fetch(`${API}/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(body) });
+        const data = await res.json();
+        if (data.ok) {
+          toast('Filters saved!');
+          updateMatchFilterSummary(body);
+          document.getElementById('matchFilterForm').style.display = 'none';
+        }
+      } catch(e) { toast('Failed to save', 'error'); }
+    }
+
+    async function triggerJobSync() {
+      const btn = document.getElementById('findJobsBtn');
+      btn.disabled = true;
+      btn.textContent = '⏳ Searching for jobs...';
+      try {
+        const res = await fetch(`${API}/admin/sync-jobs?pin=7714`, { method: 'POST', headers: authHeaders() });
+        const data = await res.json();
+        toast('Found ' + (data.new_jobs || 0) + ' new jobs!');
+        // Recompute matches
+        await fetch(`${API}/admin/recompute-matches?pin=7714`, { method: 'POST' });
+        await loadMatches();
+      } catch(e) { toast('Search failed: ' + e.message, 'error'); }
+      btn.disabled = false;
+      btn.textContent = '🔍 Find New Jobs';
+    }
+
     // ── Saved Jobs ──
     let savedJobIds = new Set();
 
@@ -1083,115 +1165,17 @@
       } catch (ex) {}
     }
 
-    function renderLocationTags() {
-      const el = document.getElementById('locationTags');
-      if (!selectedLocations.length) { el.innerHTML = ''; return; }
-      el.innerHTML = selectedLocations.map(loc =>
-        `<span class="tag">${loc}<span class="remove" onclick="removeLocation('${loc.replace(/'/g, "\\'")}')">&times;</span></span>`
-      ).join('');
-    }
+    // Old settings location picker — removed (merged into matches)
+    function renderLocationTags() {}
+    function addLocation() {}
+    function updateLocInputState() {}
+    function removeLocation() {}
+    function filterLocations() {}
 
-    function addLocation(loc) {
-      if (selectedLocations.length >= 3) return;
-      if (!selectedLocations.includes(loc)) {
-        selectedLocations.push(loc);
-        renderLocationTags();
-        updateLocInputState();
-      }
-      document.getElementById('settLocInput').value = '';
-      document.getElementById('locDropdown').style.display = 'none';
-    }
-
-    function updateLocInputState() {
-      const input = document.getElementById('settLocInput');
-      const maxNote = document.getElementById('locMaxNote');
-      if (selectedLocations.length >= 3) {
-        input.disabled = true;
-        input.placeholder = 'Maximum 3 cities reached';
-        if (maxNote) maxNote.style.display = '';
-      } else {
-        input.disabled = false;
-        input.placeholder = 'Type a major city...';
-        if (maxNote) maxNote.style.display = 'none';
-      }
-    }
-
-    function removeLocation(loc) {
-      selectedLocations = selectedLocations.filter(l => l !== loc);
-      renderLocationTags();
-      updateLocInputState();
-    }
-
-    function filterLocations() {
-      const input = document.getElementById('settLocInput').value.toLowerCase();
-      const dropdown = document.getElementById('locDropdown');
-      const filtered = allLocations.filter(l => l.toLowerCase().includes(input) && !selectedLocations.includes(l)).slice(0, 10);
-      if (!filtered.length) { dropdown.style.display = 'none'; return; }
-      dropdown.innerHTML = filtered.map(l => `<div class="loc-option" onclick="addLocation('${l.replace(/'/g, "\\'")}')">${l}</div>`).join('');
-      dropdown.style.display = 'block';
-    }
-
-    // Close dropdown on outside click
-    document.addEventListener('click', e => {
-      if (!e.target.closest('.location-picker')) document.getElementById('locDropdown').style.display = 'none';
-    });
-
-    async function loadSettings() {
-      await loadLocations();
-      try {
-        const res = await fetch(`${API}/settings`, { headers: authHeaders() });
-        const data = await res.json();
-        if (data.ok && data.settings) {
-          selectedLocations = data.settings.locations || [];
-          renderLocationTags();
-          updateLocInputState();
-          const rad = data.settings.radius || 50;
-          document.getElementById('settRadius').value = rad;
-          document.getElementById('radiusVal').textContent = rad;
-          document.getElementById('settSalMin').value = data.settings.salary_min || '';
-          document.getElementById('settSalMax').value = data.settings.salary_max || '';
-          document.getElementById('settIndustries').value = (data.settings.industries || []).join(', ');
-        }
-      } catch (ex) {}
-    }
-
-    async function saveSettings(e) {
-      e.preventDefault();
-      try {
-        const body = {
-          locations: selectedLocations,
-          radius: parseInt(document.getElementById('settRadius').value) || 50,
-          salary_min: parseInt(document.getElementById('settSalMin').value) || 0,
-          salary_max: parseInt(document.getElementById('settSalMax').value) || 0,
-          industries: document.getElementById('settIndustries').value.split(',').map(s => s.trim()).filter(Boolean)
-        };
-        await fetch(`${API}/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(body) });
-        toast('Settings saved! Matches will update on next load.');
-        setTimeout(loadMatches, 500);
-      } catch (ex) {
-        toast('Failed to save', 'error');
-      }
-    }
-
-    // ── Alert Settings ──
-    async function saveAlertSettings() {
-      try {
-        const body = {
-          locations: selectedLocations,
-          radius: parseInt(document.getElementById('settRadius').value) || 50,
-          salary_min: parseInt(document.getElementById('settSalMin').value) || 0,
-          salary_max: parseInt(document.getElementById('settSalMax').value) || 0,
-          industries: document.getElementById('settIndustries').value.split(',').map(s => s.trim()).filter(Boolean),
-          alerts_enabled: document.getElementById('settAlertsEnabled').checked,
-          alert_threshold: parseInt(document.getElementById('settAlertThreshold').value) || 75,
-          alert_email: document.getElementById('settAlertEmail').value.trim()
-        };
-        await fetch(`${API}/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(body) });
-        toast('Alert settings saved!');
-      } catch (ex) {
-        toast('Failed to save alert settings', 'error');
-      }
-    }
+    // Settings merged into Matches tab
+    async function loadSettings() { /* no-op — merged into matches */ }
+    async function saveSettings(e) { if(e) e.preventDefault(); }
+    async function saveAlertSettings() { }
 
     async function loadAlertHistory() {
       try {
