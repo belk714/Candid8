@@ -691,7 +691,8 @@ async function handleUpdateSettings(request, env, cors) {
     industries: body.industries || [],
     alerts_enabled: body.alerts_enabled !== undefined ? body.alerts_enabled : (existing.alerts_enabled !== undefined ? existing.alerts_enabled : true),
     alert_threshold: body.alert_threshold || existing.alert_threshold || 75,
-    alert_email: body.alert_email || existing.alert_email || ''
+    alert_email: body.alert_email || existing.alert_email || '',
+    onboarding_complete: body.onboarding_complete !== undefined ? body.onboarding_complete : (existing.onboarding_complete || false)
   };
   await env.DATA.put(`user_settings:${userId}`, JSON.stringify(settings));
   const warning = locations.length === 0 ? 'No cities set — alerts won\'t fire without at least one location.' : null;

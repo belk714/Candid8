@@ -145,6 +145,40 @@
     .toast.show { transform: translateY(0); opacity: 1; }
     .toast.error { border-color: var(--red); color: var(--red); }
     .toast.success { border-color: var(--green); color: var(--green); }
+
+    /* Onboarding Wizard */
+    .onboarding { display: none; min-height: 100vh; background: var(--bg); align-items: center; justify-content: center; padding: 24px; }
+    .onboarding.active { display: flex; }
+    .onboarding-card { max-width: 500px; width: 100%; text-align: center; }
+    .onboarding-progress { display: flex; justify-content: center; gap: 10px; margin-bottom: 40px; }
+    .onboarding-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); transition: all .3s; }
+    .onboarding-dot.active { background: var(--accent); transform: scale(1.3); }
+    .onboarding-dot.done { background: var(--green); }
+    .onboarding-step { display: none; animation: fadeIn .3s ease; }
+    .onboarding-step.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .onboarding-step h2 { font-size: 1.6rem; font-weight: 700; margin-bottom: 12px; }
+    .onboarding-step p.sub { color: var(--text-muted); margin-bottom: 28px; font-size: .95rem; }
+    .ob-drop-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 40px 20px; cursor: pointer; transition: all .2s; margin-bottom: 20px; }
+    .ob-drop-zone:hover, .ob-drop-zone.dragover { border-color: var(--accent); background: var(--accent-glow); }
+    .ob-drop-zone .icon { font-size: 2.2rem; margin-bottom: 8px; }
+    .ob-drop-zone p { color: var(--text-muted); font-size: .9rem; }
+    .ob-loading { display: none; padding: 32px; text-align: center; color: var(--text-muted); }
+    .ob-loading .spinner { margin: 0 auto 12px; width: 28px; height: 28px; }
+    .ob-summary { display: none; padding: 16px; background: var(--surface); border: 1px solid var(--green); border-radius: 12px; margin-bottom: 16px; color: var(--green); font-weight: 500; }
+    .ob-city-tags { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 16px 0; min-height: 36px; }
+    .ob-city-tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--accent-glow); color: var(--accent); border-radius: 8px; font-size: .85rem; font-weight: 500; }
+    .ob-city-tag .remove { cursor: pointer; opacity: .7; }
+    .ob-city-tag .remove:hover { opacity: 1; }
+    .ob-city-input-wrap { position: relative; margin-bottom: 16px; }
+    .ob-city-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface2); border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,.3); display: none; }
+    .ob-city-dropdown .opt { padding: 10px 14px; cursor: pointer; font-size: .9rem; }
+    .ob-city-dropdown .opt:hover { background: var(--accent); color: #fff; }
+    .ob-slider-wrap { text-align: left; margin-bottom: 20px; }
+    .ob-slider-wrap label { display: block; font-size: .9rem; margin-bottom: 6px; color: var(--text-muted); }
+    .ob-slider-wrap input[type=range] { width: 100%; }
+    .setup-banner { display: none; padding: 12px 16px; background: rgba(234,179,8,.08); border: 1px solid rgba(234,179,8,.2); border-radius: 10px; margin-bottom: 20px; font-size: .85rem; color: var(--yellow); }
+    .setup-banner a { color: var(--accent); cursor: pointer; text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -169,6 +203,69 @@
     </form>
   </div>
 
+  <!-- Onboarding Wizard -->
+  <div id="onboarding" class="onboarding">
+    <div class="onboarding-card">
+      <div class="onboarding-progress">
+        <div class="onboarding-dot active" id="obDot0"></div>
+        <div class="onboarding-dot" id="obDot1"></div>
+        <div class="onboarding-dot" id="obDot2"></div>
+        <div class="onboarding-dot" id="obDot3"></div>
+      </div>
+
+      <!-- Step 1: Welcome -->
+      <div class="onboarding-step active" id="obStep0">
+        <h2>Welcome to Candid8 🎯</h2>
+        <p class="sub">We'll get you set up in 3 quick steps so we can start finding jobs that fit.</p>
+        <button class="btn" onclick="obNext()">Continue</button>
+      </div>
+
+      <!-- Step 2: Upload Resume -->
+      <div class="onboarding-step" id="obStep1">
+        <h2>Upload your resume</h2>
+        <p class="sub">We'll analyze your skills, experience, and background to build your profile.</p>
+        <div class="ob-drop-zone" id="obDropZone" onclick="document.getElementById('obFileInput').click()">
+          <div class="icon">📄</div>
+          <p>Drop your resume here or click to browse<br><span style="font-size:.78rem">PDF, DOCX, or TXT</span></p>
+        </div>
+        <input type="file" id="obFileInput" accept=".pdf,.docx,.doc,.txt" style="display:none">
+        <div class="ob-loading" id="obLoading">
+          <div class="spinner"></div>
+          <p>Analyzing your resume... This takes about 30 seconds</p>
+        </div>
+        <div class="ob-summary" id="obSummary"></div>
+        <button class="btn" id="obResumeNext" disabled onclick="obNext()">Continue</button>
+      </div>
+
+      <!-- Step 3: Set Cities -->
+      <div class="onboarding-step" id="obStep2">
+        <h2>Where are you looking?</h2>
+        <p class="sub">Select up to 3 cities. We'll only alert you about jobs in these locations.</p>
+        <div class="ob-city-tags" id="obCityTags"></div>
+        <div class="ob-city-input-wrap">
+          <input type="text" id="obCityInput" placeholder="Type a major city..." autocomplete="off" style="width:100%;padding:12px 16px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
+          <div class="ob-city-dropdown" id="obCityDropdown"></div>
+        </div>
+        <button class="btn" id="obCityNext" disabled onclick="obNext()">Continue</button>
+      </div>
+
+      <!-- Step 4: Alert Preferences -->
+      <div class="onboarding-step" id="obStep3">
+        <h2>How should we reach you?</h2>
+        <p class="sub">Configure your job alert preferences.</p>
+        <div class="form-group" style="text-align:left;margin-bottom:16px">
+          <label>Alert email</label>
+          <input type="email" id="obAlertEmail" placeholder="you@email.com">
+        </div>
+        <div class="ob-slider-wrap">
+          <label>Minimum fit score for alerts: <strong id="obThreshVal">75</strong>%</label>
+          <input type="range" id="obThreshold" min="60" max="100" step="5" value="75" oninput="document.getElementById('obThreshVal').textContent=this.value">
+        </div>
+        <button class="btn" onclick="finishOnboarding()">Finish Setup</button>
+      </div>
+    </div>
+  </div>
+
   <!-- App Dashboard -->
   <div id="appDashboard" class="app">
     <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
@@ -186,6 +283,7 @@
       <div class="logout" onclick="logout()">← Log out</div>
     </aside>
     <main class="main">
+      <div class="setup-banner" id="setupBanner"></div>
       <!-- Profile Tab -->
       <div class="tab-content" id="tab-profile">
         <h1>Your Profile</h1>
@@ -281,9 +379,36 @@
     let token = localStorage.getItem('candid8_token');
     let currentUser = JSON.parse(localStorage.getItem('candid8_user') || 'null');
 
+    // ── Onboarding State ──
+    let obStep = 0;
+    let obCities = [];
+    let obResumeUploaded = false;
+    let obProfileData = null;
+
     // ── Init ──
     if (token && currentUser) {
-      showApp();
+      checkOnboardingOrDashboard();
+    }
+
+    async function checkOnboardingOrDashboard() {
+      try {
+        const res = await fetch(`${API}/settings`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.ok && data.settings && data.settings.onboarding_complete) {
+          showApp();
+          return;
+        }
+        // Check if they have a profile (returning user with data but no flag)
+        const pRes = await fetch(`${API}/profile`, { headers: authHeaders() });
+        const pData = await pRes.json();
+        if (pData.ok && pData.profile && pData.profile.structured_data && data.ok && data.settings && data.settings.locations && data.settings.locations.length > 0) {
+          // Already set up, just missing the flag — set it and go to dashboard
+          await fetch(`${API}/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ...data.settings, onboarding_complete: true }) });
+          showApp();
+          return;
+        }
+      } catch (ex) {}
+      showOnboarding();
     }
 
     // ── Auth ──
@@ -316,7 +441,7 @@
         currentUser = data.user;
         localStorage.setItem('candid8_token', token);
         localStorage.setItem('candid8_user', JSON.stringify(currentUser));
-        showApp();
+        checkOnboardingOrDashboard();
       } catch (ex) {
         err.textContent = ex.message;
       } finally {
@@ -334,11 +459,13 @@
 
     function showApp() {
       document.getElementById('authScreen').style.display = 'none';
+      document.getElementById('onboarding').classList.remove('active');
       document.getElementById('appDashboard').classList.add('active');
       loadProfile();
       loadDocuments();
       loadMatches();
       loadSettings();
+      checkSetupBanner();
     }
 
     // ── Navigation ──
@@ -852,6 +979,183 @@
         </div>`).join('');
       } catch (ex) {
         document.getElementById('alertHistory').innerHTML = '<p style="color:var(--text-muted)">Failed to load.</p>';
+      }
+    }
+
+    // ── Onboarding Logic ──
+    function showOnboarding() {
+      document.getElementById('authScreen').style.display = 'none';
+      document.getElementById('appDashboard').classList.remove('active');
+      document.getElementById('onboarding').classList.add('active');
+      obStep = 0;
+      updateObStep();
+      initObDropZone();
+      initObCityInput();
+      loadLocations(); // Pre-load city list for picker
+      // Pre-fill email
+      if (currentUser) document.getElementById('obAlertEmail').value = currentUser.email || '';
+    }
+
+    function updateObStep() {
+      for (let i = 0; i < 4; i++) {
+        document.getElementById(`obStep${i}`).classList.toggle('active', i === obStep);
+        const dot = document.getElementById(`obDot${i}`);
+        dot.classList.toggle('active', i === obStep);
+        dot.classList.toggle('done', i < obStep);
+      }
+    }
+
+    function obNext() {
+      if (obStep < 3) { obStep++; updateObStep(); }
+    }
+
+    function initObDropZone() {
+      const dz = document.getElementById('obDropZone');
+      const fi = document.getElementById('obFileInput');
+      dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+      dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+      dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); if (e.dataTransfer.files[0]) obUpload(e.dataTransfer.files[0]); });
+      fi.addEventListener('change', () => { if (fi.files[0]) obUpload(fi.files[0]); });
+    }
+
+    async function obUpload(file) {
+      const dz = document.getElementById('obDropZone');
+      const loading = document.getElementById('obLoading');
+      const summary = document.getElementById('obSummary');
+      dz.style.display = 'none';
+      loading.style.display = 'block';
+      summary.style.display = 'none';
+
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const res = await fetch(`${API}/documents/upload`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: fd
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+
+        // Wait a moment for profile rebuild then fetch it
+        await new Promise(r => setTimeout(r, 2000));
+        const pRes = await fetch(`${API}/profile`, { headers: authHeaders() });
+        const pData = await pRes.json();
+        loading.style.display = 'none';
+
+        if (pData.ok && pData.profile && pData.profile.structured_data) {
+          obProfileData = pData.profile.structured_data;
+          const skillCount = obProfileData.skills?.skill_count || obProfileData.skill_count || '?';
+          const yoe = obProfileData.years_of_experience || '?';
+          summary.textContent = `✓ Found ${skillCount} skills across ${yoe} years of experience`;
+          summary.style.display = 'block';
+        } else {
+          summary.textContent = '✓ Resume uploaded! Profile is building...';
+          summary.style.display = 'block';
+        }
+        obResumeUploaded = true;
+        document.getElementById('obResumeNext').disabled = false;
+      } catch (ex) {
+        loading.style.display = 'none';
+        dz.style.display = '';
+        toast('Upload failed: ' + ex.message, 'error');
+      }
+    }
+
+    function initObCityInput() {
+      const input = document.getElementById('obCityInput');
+      const dropdown = document.getElementById('obCityDropdown');
+      input.addEventListener('input', () => filterObCities());
+      input.addEventListener('focus', () => filterObCities());
+      document.addEventListener('click', e => {
+        if (!e.target.closest('.ob-city-input-wrap')) dropdown.style.display = 'none';
+      });
+    }
+
+    function filterObCities() {
+      const input = document.getElementById('obCityInput');
+      const dropdown = document.getElementById('obCityDropdown');
+      const val = input.value.toLowerCase();
+      // Use allLocations from settings loader, or hardcoded metros
+      const locs = allLocations.length ? allLocations : Object.keys({
+        'Houston, TX':1,'Dallas, TX':1,'Austin, TX':1,'San Antonio, TX':1,'Denver, CO':1,
+        'New York, NY':1,'Chicago, IL':1,'Los Angeles, CA':1,'San Francisco, CA':1,'Atlanta, GA':1,
+        'Boston, MA':1,'Washington, DC':1,'Seattle, WA':1,'Phoenix, AZ':1,'Miami, FL':1,'Remote':1
+      });
+      const filtered = locs.filter(l => l.toLowerCase().includes(val) && !obCities.includes(l)).slice(0, 8);
+      if (!filtered.length) { dropdown.style.display = 'none'; return; }
+      dropdown.innerHTML = filtered.map(l => `<div class="opt" onclick="addObCity('${l.replace(/'/g, "\\'")}')">${l}</div>`).join('');
+      dropdown.style.display = 'block';
+    }
+
+    function addObCity(city) {
+      if (obCities.length >= 3 || obCities.includes(city)) return;
+      obCities.push(city);
+      renderObCities();
+      document.getElementById('obCityInput').value = '';
+      document.getElementById('obCityDropdown').style.display = 'none';
+      if (obCities.length >= 3) document.getElementById('obCityInput').disabled = true;
+      document.getElementById('obCityNext').disabled = obCities.length === 0;
+    }
+
+    function removeObCity(city) {
+      obCities = obCities.filter(c => c !== city);
+      renderObCities();
+      document.getElementById('obCityInput').disabled = false;
+      document.getElementById('obCityNext').disabled = obCities.length === 0;
+    }
+
+    function renderObCities() {
+      document.getElementById('obCityTags').innerHTML = obCities.map(c =>
+        `<span class="ob-city-tag">${c}<span class="remove" onclick="removeObCity('${c.replace(/'/g, "\\'")}')">&times;</span></span>`
+      ).join('');
+    }
+
+    async function finishOnboarding() {
+      try {
+        // Save settings
+        const body = {
+          locations: obCities,
+          radius: 50,
+          alerts_enabled: true,
+          alert_threshold: parseInt(document.getElementById('obThreshold').value) || 75,
+          alert_email: document.getElementById('obAlertEmail').value.trim(),
+          onboarding_complete: true
+        };
+        await fetch(`${API}/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(body) });
+
+        // Hide onboarding, show app
+        document.getElementById('onboarding').classList.remove('active');
+        showApp();
+        toast("You're all set! We'll email you when we find high-fit jobs.", 'success');
+      } catch (ex) {
+        toast('Failed to save: ' + ex.message, 'error');
+      }
+    }
+
+    // ── Dashboard Setup Banner ──
+    async function checkSetupBanner() {
+      const banner = document.getElementById('setupBanner');
+      const msgs = [];
+      try {
+        const [pRes, sRes] = await Promise.all([
+          fetch(`${API}/profile`, { headers: authHeaders() }),
+          fetch(`${API}/settings`, { headers: authHeaders() })
+        ]);
+        const pData = await pRes.json();
+        const sData = await sRes.json();
+        if (!pData.ok || !pData.profile || !pData.profile.structured_data) {
+          msgs.push('Upload your resume in <a onclick="switchTab(\'documents\')">Documents</a> to build your profile');
+        }
+        if (!sData.ok || !sData.settings || !sData.settings.locations || !sData.settings.locations.length) {
+          msgs.push('Set up your cities in <a onclick="switchTab(\'settings\')">Settings</a> to receive job alerts');
+        }
+      } catch (ex) {}
+      if (msgs.length) {
+        banner.innerHTML = '⚠️ ' + msgs.join(' · ');
+        banner.style.display = 'block';
+      } else {
+        banner.style.display = 'none';
       }
     }
 
