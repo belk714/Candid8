@@ -36307,6 +36307,8 @@ async function computeMatches(userId, env, profile) {
     let job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
     if (!job || !job.embedding) continue;
     if (locations.length > 0 && !jobMatchesLocationFilter(job, locations, radius)) continue;
+    if (settings.salary_min && job.salary_max && job.salary_max < settings.salary_min) continue;
+    if (settings.salary_max && job.salary_min && job.salary_min > settings.salary_max) continue;
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);

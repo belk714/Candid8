@@ -1249,6 +1249,10 @@ async function computeMatches(userId, env, profile) {
     // 1. Location filter — hard gate (skip if locations set and no match)
     if (locations.length > 0 && !jobMatchesLocationFilter(job, locations, radius)) continue;
 
+    // 1b. Salary filter — hard gate
+    if (settings.salary_min && job.salary_max && job.salary_max < settings.salary_min) continue;
+    if (settings.salary_max && job.salary_min && job.salary_min > settings.salary_max) continue;
+
     // 2. Cosine similarity — skip if below 0.45 threshold
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);

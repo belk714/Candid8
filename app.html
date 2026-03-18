@@ -263,14 +263,26 @@
         <button class="btn" id="obResumeNext" disabled onclick="obNext()">Continue</button>
       </div>
 
-      <!-- Step 3: Set Cities -->
+      <!-- Step 3: Set Cities + Salary -->
       <div class="onboarding-step" id="obStep2">
-        <h2>Where are you looking?</h2>
-        <p class="sub">Select up to 3 cities. We'll only alert you about jobs in these locations.</p>
+        <h2>What are you looking for?</h2>
+        <p class="sub">Set your target locations and salary range.</p>
+        <h3 style="font-size:1rem;text-align:left;margin-bottom:8px">📍 Cities (up to 3)</h3>
         <div class="ob-city-tags" id="obCityTags"></div>
         <div class="ob-city-input-wrap">
           <input type="text" id="obCityInput" placeholder="Type a major city..." autocomplete="off" style="width:100%;padding:12px 16px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
           <div class="ob-city-dropdown" id="obCityDropdown"></div>
+        </div>
+        <h3 style="font-size:1rem;text-align:left;margin:20px 0 8px">💰 Salary Range</h3>
+        <div style="display:flex;gap:12px;margin-bottom:20px">
+          <div class="form-group" style="flex:1;text-align:left;margin:0">
+            <label style="font-size:.85rem">Minimum ($)</label>
+            <input type="number" id="obSalaryMin" placeholder="e.g. 120000" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
+          </div>
+          <div class="form-group" style="flex:1;text-align:left;margin:0">
+            <label style="font-size:.85rem">Maximum ($)</label>
+            <input type="number" id="obSalaryMax" placeholder="e.g. 200000" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
+          </div>
         </div>
         <button class="btn" id="obCityNext" disabled onclick="obNext()">Continue</button>
       </div>
@@ -1317,6 +1329,8 @@
         const body = {
           locations: obCities,
           radius: 50,
+          salary_min: parseInt(document.getElementById('obSalaryMin').value) || 0,
+          salary_max: parseInt(document.getElementById('obSalaryMax').value) || 0,
           alerts_enabled: true,
           alert_threshold: parseInt(document.getElementById('obThreshold').value) || 75,
           alert_email: document.getElementById('obAlertEmail').value.trim(),
