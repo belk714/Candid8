@@ -120,6 +120,9 @@ async function route(url, request, env, cors) {
   // Admin: sync Adzuna jobs
   if (path === '/api/admin/sync-jobs' && method === 'POST') return handleSyncAdzunaJobs(request, env, cors);
 
+  // Admin: re-embed all jobs with normalized format
+  if (path === '/api/admin/reembed-all' && method === 'POST') return handleReembedAll(env, cors);
+
   return new Response('Not found', { status: 404, headers: cors });
 }
 
@@ -327,8 +330,8 @@ async function rebuildProfile(userId, env) {
   // Parse with OpenAI
   const structured = await parseResumeWithOpenAI(env, allText);
   
-  // Build rich text for embedding with full skill context
-  const embeddingText = buildEmbeddingText(structured);
+  // Build normalized text for embedding (same format as job embeddings)
+  const embeddingText = buildNormalizedEmbeddingText('profile', structured);
   const embedding = await getEmbedding(env, embeddingText);
 
   const profile = {
@@ -355,15 +358,17 @@ async function handleGetSettings(request, env, cors) {
 async function handleUpdateSettings(request, env, cors) {
   const userId = await requireAuth(request, env);
   const body = await request.json();
+  const locations = Array.isArray(body.locations) ? body.locations.slice(0, 3) : [];
   const settings = {
-    locations: body.locations || [],
+    locations,
     radius: body.radius || 50,
     salary_min: body.salary_min || 0,
     salary_max: body.salary_max || 0,
     industries: body.industries || []
   };
   await env.DATA.put(`user_settings:${userId}`, JSON.stringify(settings));
-  return Response.json({ ok: true, settings }, { headers: cors });
+  const warning = locations.length === 0 ? 'No cities set — alerts won\'t fire without at least one location.' : null;
+  return Response.json({ ok: true, settings, warning }, { headers: cors });
 }
 
 // Major metro coords for radius matching
@@ -580,11 +585,25 @@ async function computeMatches(userId, env, profile) {
   
   if (!profile.embedding || jobIds.length === 0) return;
 
+  // Load user settings for location filter
+  const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || '{}');
+  const locations = settings.locations || [];
+  const radius = settings.radius || 50;
+
   const matchIds = [];
   
   for (const jobId of jobIds) {
     let job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
     if (!job || !job.embedding) continue;
+
+    // 1. Location filter — hard gate (skip if locations set and no match)
+    if (locations.length > 0 && !jobMatchesLocationFilter(job, locations, radius)) continue;
+
+    // 2. Cosine similarity — skip if below 0.45 threshold
+    const jobEmb = JSON.parse(job.embedding);
+    const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
+    const cosinePct = Math.round(cosineScore * 100);
+    if (cosinePct < 45) continue;
 
     // Backfill structured requirements on-the-fly if missing
     if (!job.structured_requirements) {
@@ -600,11 +619,7 @@ async function computeMatches(userId, env, profile) {
       }
     }
 
-    const jobEmb = JSON.parse(job.embedding);
-    const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
-    const cosinePct = Math.round(cosineScore * 100);
-
-    // Generate breakdown using structured comparison if available
+    // 3. Structured comparison — generate breakdown for jobs that pass
     const breakdown = generateBreakdown(profile.structured_data, job, cosinePct);
 
     const matchId = uuid();
@@ -1199,6 +1214,51 @@ Rules:
   return result;
 }
 
+// ── Normalized Embedding Text ────────────────────────────────────────────────
+// Produces the same structured format for both profiles and jobs so cosine
+// similarity is measured in the same semantic space.
+
+function buildNormalizedEmbeddingText(type, data) {
+  if (type === 'profile') {
+    // data = structured profile (from parseResumeWithOpenAI)
+    const sk = data.skills || {};
+    const allSkills = [];
+    for (const cat of ['technical_domain', 'tools_platforms', 'methodologies', 'leadership_consulting', 'industry_knowledge', 'soft_skills']) {
+      if (Array.isArray(sk[cat])) {
+        allSkills.push(...sk[cat].map(s => typeof s === 'string' ? s : s.skill));
+      }
+    }
+    // Fallback to flat arrays
+    if (!allSkills.length) {
+      if (sk.technical) allSkills.push(...sk.technical);
+      if (sk.soft) allSkills.push(...sk.soft);
+    }
+
+    const yoe = data.years_of_experience || 0;
+    const industries = data.industries || [];
+    // Infer seniority
+    const senLevel = yoe >= 20 ? 'vp' : yoe >= 15 ? 'director' : yoe >= 8 ? 'senior' : yoe >= 3 ? 'mid' : 'entry';
+    const education = (data.education || []).map(e => typeof e === 'string' ? e : (e.degree || '')).filter(Boolean);
+    const certs = (data.certifications || []).map(c => typeof c === 'string' ? c : (c.name || '')).filter(Boolean);
+
+    return `Skills: ${allSkills.join(', ')} | ${yoe} years experience | Industries: ${industries.join(', ')} | Seniority: ${senLevel} | Education: ${education.join(', ')} | Certifications: ${certs.join(', ')}`;
+  }
+
+  if (type === 'job') {
+    // data = structured_requirements object
+    const skills = [...(data.required_skills || []), ...(data.preferred_skills || [])];
+    const yoe = data.min_years_experience || 0;
+    const industries = data.industries || [];
+    const seniority = data.seniority_level || 'mid';
+    const education = data.education_required || '';
+    const certs = data.certifications_preferred || [];
+
+    return `Skills: ${skills.join(', ')} | ${yoe} years experience | Industries: ${industries.join(', ')} | Seniority: ${seniority} | Education: ${education} | Certifications: ${certs.join(', ')}`;
+  }
+
+  return '';
+}
+
 function buildEmbeddingText(profile) {
   const parts = [];
   parts.push(profile.summary || '');
@@ -1447,10 +1507,13 @@ async function handleSyncAdzunaJobs(request, env, cors) {
       console.error('Structured parse error for:', j.title, e.message);
     }
 
-    // 3. Generate embedding using full description
+    // 3. Generate embedding using normalized format if structured reqs available
     let embedding = null;
     try {
-      embedding = await getEmbedding(env, `${j.title} at ${j.company}. ${j.location}. ${j.category}. ${descriptionForEmbedding}`);
+      const embText = structuredReqs
+        ? buildNormalizedEmbeddingText('job', structuredReqs)
+        : `${j.title} at ${j.company}. ${descriptionForEmbedding}`;
+      embedding = await getEmbedding(env, embText);
       embedded++;
     } catch (e) {
       failed++;
@@ -1512,5 +1575,60 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     new_structured: structured,
     backfilled: backfilled,
     queries_used: queries.length
+  }, { headers: cors });
+}
+
+// ── Admin: Re-embed all jobs with normalized format ──────────────────────────
+
+async function handleReembedAll(env, cors) {
+  const jobsIndexJson = await env.DATA.get('jobs_index') || '[]';
+  const jobIds = JSON.parse(jobsIndexJson);
+
+  let reembedded = 0;
+  let parsed = 0;
+  let failed = 0;
+
+  for (const jobId of jobIds) {
+    const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
+    if (!job) continue;
+
+    try {
+      let sr = null;
+      if (job.structured_requirements) {
+        sr = JSON.parse(job.structured_requirements);
+      } else {
+        // Try to parse structured requirements from description
+        const descText = job.full_description || job.description || '';
+        if (descText.length > 50) {
+          sr = await parseStructuredRequirements(env, job.title, job.company, descText);
+          if (sr) {
+            job.structured_requirements = JSON.stringify(sr);
+            parsed++;
+          }
+        }
+      }
+
+      const embText = sr
+        ? buildNormalizedEmbeddingText('job', sr)
+        : `${job.title} at ${job.company}. ${job.description || ''}`;
+      const embedding = await getEmbedding(env, embText);
+      job.embedding = JSON.stringify(embedding);
+      await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
+      reembedded++;
+    } catch (e) {
+      failed++;
+      console.error('Re-embed failed for', job.title, e.message);
+      if (e.message && e.message.includes('rate')) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+
+  return Response.json({
+    ok: true,
+    total_jobs: jobIds.length,
+    reembedded,
+    newly_parsed: parsed,
+    failed
   }, { headers: cors });
 }

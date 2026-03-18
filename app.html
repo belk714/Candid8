@@ -213,13 +213,15 @@
           <h3>Preferences</h3>
           <form class="settings-form" onsubmit="saveSettings(event)">
             <div class="form-group">
-              <label>Preferred Locations</label>
+              <label>Preferred Locations <span style="font-size:.75rem;color:var(--yellow)">★ Required for alerts</span></label>
+              <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:8px">Set your preferred cities — only jobs in these locations (+ Remote if selected) will be matched. Max 3 cities.</p>
               <div class="location-picker">
                 <div id="locationTags" class="tags" style="margin-bottom:8px"></div>
                 <div style="position:relative">
                   <input type="text" id="settLocInput" placeholder="Type a major city..." autocomplete="off" oninput="filterLocations()" onfocus="filterLocations()">
                   <div id="locDropdown" class="loc-dropdown" style="display:none"></div>
                 </div>
+                <p id="locMaxNote" style="display:none;font-size:.75rem;color:var(--yellow);margin-top:4px">Maximum 3 cities</p>
               </div>
             </div>
             <div class="form-group">
@@ -710,17 +712,34 @@
     }
 
     function addLocation(loc) {
+      if (selectedLocations.length >= 3) return;
       if (!selectedLocations.includes(loc)) {
         selectedLocations.push(loc);
         renderLocationTags();
+        updateLocInputState();
       }
       document.getElementById('settLocInput').value = '';
       document.getElementById('locDropdown').style.display = 'none';
     }
 
+    function updateLocInputState() {
+      const input = document.getElementById('settLocInput');
+      const maxNote = document.getElementById('locMaxNote');
+      if (selectedLocations.length >= 3) {
+        input.disabled = true;
+        input.placeholder = 'Maximum 3 cities reached';
+        if (maxNote) maxNote.style.display = '';
+      } else {
+        input.disabled = false;
+        input.placeholder = 'Type a major city...';
+        if (maxNote) maxNote.style.display = 'none';
+      }
+    }
+
     function removeLocation(loc) {
       selectedLocations = selectedLocations.filter(l => l !== loc);
       renderLocationTags();
+      updateLocInputState();
     }
 
     function filterLocations() {
@@ -745,6 +764,7 @@
         if (data.ok && data.settings) {
           selectedLocations = data.settings.locations || [];
           renderLocationTags();
+          updateLocInputState();
           const rad = data.settings.radius || 50;
           document.getElementById('settRadius').value = rad;
           document.getElementById('radiusVal').textContent = rad;

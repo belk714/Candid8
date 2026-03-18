@@ -35388,6 +35388,7 @@ async function route(url, request, env, cors) {
   }
   if (path === "/api/admin/seed-jobs" && method === "POST") return handleSeedJobs(env, cors);
   if (path === "/api/admin/sync-jobs" && method === "POST") return handleSyncAdzunaJobs(request, env, cors);
+  if (path === "/api/admin/reembed-all" && method === "POST") return handleReembedAll(env, cors);
   return new Response("Not found", { status: 404, headers: cors });
 }
 async function handleWaitlistAdd(request, env, cors) {
@@ -35545,7 +35546,7 @@ async function rebuildProfile(userId, env) {
   }
   if (!allText.trim()) throw new Error("No valid document text found. All docs may have failed extraction.");
   const structured = await parseResumeWithOpenAI(env, allText);
-  const embeddingText = buildEmbeddingText(structured);
+  const embeddingText = buildNormalizedEmbeddingText("profile", structured);
   const embedding = await getEmbedding(env, embeddingText);
   const profile = {
     structured_data: structured,
@@ -35564,15 +35565,17 @@ async function handleGetSettings(request, env, cors) {
 async function handleUpdateSettings(request, env, cors) {
   const userId = await requireAuth(request, env);
   const body = await request.json();
+  const locations = Array.isArray(body.locations) ? body.locations.slice(0, 3) : [];
   const settings = {
-    locations: body.locations || [],
+    locations,
     radius: body.radius || 50,
     salary_min: body.salary_min || 0,
     salary_max: body.salary_max || 0,
     industries: body.industries || []
   };
   await env.DATA.put(`user_settings:${userId}`, JSON.stringify(settings));
-  return Response.json({ ok: true, settings }, { headers: cors });
+  const warning = locations.length === 0 ? "No cities set \u2014 alerts won't fire without at least one location." : null;
+  return Response.json({ ok: true, settings, warning }, { headers: cors });
 }
 var MAJOR_METROS = {
   "Houston, TX": { lat: 29.7604, lng: -95.3698, state: "TX" },
@@ -35751,10 +35754,18 @@ async function computeMatches(userId, env, profile) {
   const jobsIndexJson = await env.DATA.get("jobs_index") || "[]";
   const jobIds = JSON.parse(jobsIndexJson);
   if (!profile.embedding || jobIds.length === 0) return;
+  const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
+  const locations = settings.locations || [];
+  const radius = settings.radius || 50;
   const matchIds = [];
   for (const jobId of jobIds) {
     let job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
     if (!job || !job.embedding) continue;
+    if (locations.length > 0 && !jobMatchesLocationFilter(job, locations, radius)) continue;
+    const jobEmb = JSON.parse(job.embedding);
+    const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
+    const cosinePct = Math.round(cosineScore * 100);
+    if (cosinePct < 45) continue;
     if (!job.structured_requirements) {
       try {
         const descText = job.full_description || job.description || "";
@@ -35767,9 +35778,6 @@ async function computeMatches(userId, env, profile) {
         console.error("Backfill structured requirements failed for", job.title, e2.message);
       }
     }
-    const jobEmb = JSON.parse(job.embedding);
-    const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
-    const cosinePct = Math.round(cosineScore * 100);
     const breakdown = generateBreakdown(profile.structured_data, job, cosinePct);
     const matchId = uuid();
     const match = {
@@ -36289,41 +36297,36 @@ Rules:
   }
   return result;
 }
-function buildEmbeddingText(profile) {
-  const parts = [];
-  parts.push(profile.summary || "");
-  parts.push(`${profile.years_of_experience || 0} years of experience.`);
-  if (profile.industries?.length) parts.push(`Industries: ${profile.industries.join(", ")}.`);
-  const sk = profile.skills || {};
-  const cats = ["technical_domain", "tools_platforms", "methodologies", "leadership_consulting", "industry_knowledge", "soft_skills"];
-  for (const cat of cats) {
-    const items = sk[cat];
-    if (Array.isArray(items) && items.length) {
-      const label = cat.replace(/_/g, " ");
-      const skillTexts = items.map((s2) => {
-        if (typeof s2 === "string") return s2;
-        let t2 = s2.skill;
-        if (s2.years) t2 += ` (${s2.years} years)`;
-        if (s2.depth) t2 += ` [${s2.depth}]`;
-        return t2;
-      });
-      parts.push(`${label}: ${skillTexts.join(", ")}.`);
+function buildNormalizedEmbeddingText(type, data) {
+  if (type === "profile") {
+    const sk = data.skills || {};
+    const allSkills = [];
+    for (const cat of ["technical_domain", "tools_platforms", "methodologies", "leadership_consulting", "industry_knowledge", "soft_skills"]) {
+      if (Array.isArray(sk[cat])) {
+        allSkills.push(...sk[cat].map((s2) => typeof s2 === "string" ? s2 : s2.skill));
+      }
     }
+    if (!allSkills.length) {
+      if (sk.technical) allSkills.push(...sk.technical);
+      if (sk.soft) allSkills.push(...sk.soft);
+    }
+    const yoe = data.years_of_experience || 0;
+    const industries = data.industries || [];
+    const senLevel = yoe >= 20 ? "vp" : yoe >= 15 ? "director" : yoe >= 8 ? "senior" : yoe >= 3 ? "mid" : "entry";
+    const education = (data.education || []).map((e2) => typeof e2 === "string" ? e2 : e2.degree || "").filter(Boolean);
+    const certs = (data.certifications || []).map((c2) => typeof c2 === "string" ? c2 : c2.name || "").filter(Boolean);
+    return `Skills: ${allSkills.join(", ")} | ${yoe} years experience | Industries: ${industries.join(", ")} | Seniority: ${senLevel} | Education: ${education.join(", ")} | Certifications: ${certs.join(", ")}`;
   }
-  if (!sk.technical_domain && sk.technical) parts.push(`Technical skills: ${sk.technical.join(", ")}.`);
-  if (!sk.soft_skills && sk.soft) parts.push(`Soft skills: ${sk.soft.join(", ")}.`);
-  if (profile.job_history?.length) {
-    parts.push("Work history: " + profile.job_history.map((j2) => `${j2.title} at ${j2.company} (${j2.duration || ""}, ${j2.industry || ""})`).join("; ") + ".");
+  if (type === "job") {
+    const skills = [...data.required_skills || [], ...data.preferred_skills || []];
+    const yoe = data.min_years_experience || 0;
+    const industries = data.industries || [];
+    const seniority = data.seniority_level || "mid";
+    const education = data.education_required || "";
+    const certs = data.certifications_preferred || [];
+    return `Skills: ${skills.join(", ")} | ${yoe} years experience | Industries: ${industries.join(", ")} | Seniority: ${seniority} | Education: ${education} | Certifications: ${certs.join(", ")}`;
   }
-  if (profile.education?.length) {
-    parts.push("Education: " + profile.education.map((e2) => `${e2.degree} from ${e2.school}`).join("; ") + ".");
-  }
-  const certs = profile.certifications || [];
-  if (certs.length) {
-    const certNames = certs.map((c2) => typeof c2 === "string" ? c2 : c2.name).filter(Boolean);
-    if (certNames.length) parts.push(`Certifications: ${certNames.join(", ")}.`);
-  }
-  return parts.join("\n").substring(0, 8e3);
+  return "";
 }
 async function getEmbedding(env, text) {
   const res = await fetch("https://api.openai.com/v1/embeddings", {
@@ -36521,7 +36524,8 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     }
     let embedding = null;
     try {
-      embedding = await getEmbedding(env, `${j2.title} at ${j2.company}. ${j2.location}. ${j2.category}. ${descriptionForEmbedding}`);
+      const embText = structuredReqs ? buildNormalizedEmbeddingText("job", structuredReqs) : `${j2.title} at ${j2.company}. ${descriptionForEmbedding}`;
+      embedding = await getEmbedding(env, embText);
       embedded++;
     } catch (e2) {
       failed++;
@@ -36576,6 +36580,50 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     new_structured: structured,
     backfilled,
     queries_used: queries.length
+  }, { headers: cors });
+}
+async function handleReembedAll(env, cors) {
+  const jobsIndexJson = await env.DATA.get("jobs_index") || "[]";
+  const jobIds = JSON.parse(jobsIndexJson);
+  let reembedded = 0;
+  let parsed = 0;
+  let failed = 0;
+  for (const jobId of jobIds) {
+    const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
+    if (!job) continue;
+    try {
+      let sr2 = null;
+      if (job.structured_requirements) {
+        sr2 = JSON.parse(job.structured_requirements);
+      } else {
+        const descText = job.full_description || job.description || "";
+        if (descText.length > 50) {
+          sr2 = await parseStructuredRequirements(env, job.title, job.company, descText);
+          if (sr2) {
+            job.structured_requirements = JSON.stringify(sr2);
+            parsed++;
+          }
+        }
+      }
+      const embText = sr2 ? buildNormalizedEmbeddingText("job", sr2) : `${job.title} at ${job.company}. ${job.description || ""}`;
+      const embedding = await getEmbedding(env, embText);
+      job.embedding = JSON.stringify(embedding);
+      await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
+      reembedded++;
+    } catch (e2) {
+      failed++;
+      console.error("Re-embed failed for", job.title, e2.message);
+      if (e2.message && e2.message.includes("rate")) {
+        await new Promise((r2) => setTimeout(r2, 1e3));
+      }
+    }
+  }
+  return Response.json({
+    ok: true,
+    total_jobs: jobIds.length,
+    reembedded,
+    newly_parsed: parsed,
+    failed
   }, { headers: cors });
 }
 export {
