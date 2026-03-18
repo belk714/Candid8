@@ -35607,6 +35607,8 @@ async function route(url, request, env, cors) {
   if (path === "/api/waitlist/count" && method === "GET") return handleWaitlistCount(env, cors);
   if (path === "/api/auth/signup" && method === "POST") return handleSignup(request, env, cors);
   if (path === "/api/auth/login" && method === "POST") return handleLogin(request, env, cors);
+  if (path === "/api/auth/forgot" && method === "POST") return handleForgotPassword(request, env, cors);
+  if (path === "/api/auth/reset" && method === "POST") return handleResetPassword(request, env, cors);
   if (path === "/api/documents/upload" && method === "POST") return handleDocUpload(request, env, cors);
   if (path === "/api/documents" && method === "GET") return handleDocList(request, env, cors);
   if (path.startsWith("/api/documents/") && method === "DELETE") {
@@ -35733,6 +35735,54 @@ async function handleLogin(request, env, cors) {
   const token = uuid();
   await env.SESSIONS.put(token, userId, { expirationTtl: 86400 * 7 });
   return Response.json({ ok: true, token, user: { id: userId, email: normalized, approved: !!user.approved } }, { headers: cors });
+}
+async function handleForgotPassword(request, env, cors) {
+  const { email } = await request.json();
+  if (!email) return Response.json({ ok: false, error: "Email required" }, { headers: cors, status: 400 });
+  const normalized = email.trim().toLowerCase();
+  const userId = await env.DATA.get(`user_email:${normalized}`);
+  if (!userId) return Response.json({ ok: true, message: "If that email is registered, you will receive a reset link." }, { headers: cors });
+  const resetToken = uuid();
+  await env.SESSIONS.put(`reset:${resetToken}`, userId, { expirationTtl: 3600 });
+  const resetUrl = `https://candid8.fit/app.html?reset=${resetToken}`;
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.RESEND_API_KEY || "re_XvHm7q1S_DFWNdNXF9VD8qUdqREVxWHcK"}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: "Candid8 <alerts@candid8.fit>",
+        to: normalized,
+        subject: "Reset your Candid8 password",
+        html: `
+          <div style="font-family:-apple-system,sans-serif;max-width:480px;margin:0 auto;background:#0a0a0f;color:#e4e4e7;padding:40px 32px;border-radius:16px">
+            <h2 style="margin:0 0 16px;font-size:1.4rem">\u{1F511} Password Reset</h2>
+            <p style="color:#a1a1aa;line-height:1.6">Click the button below to reset your password. This link expires in 1 hour.</p>
+            <a href="${resetUrl}" style="display:inline-block;margin:24px 0;padding:14px 32px;background:#6366f1;color:white;text-decoration:none;border-radius:10px;font-weight:600;font-size:1rem">Reset Password</a>
+            <p style="color:#71717a;font-size:.85rem">If you didn't request this, you can safely ignore this email.</p>
+          </div>
+        `
+      })
+    });
+  } catch (e2) {
+    console.error("Reset email failed:", e2.message);
+  }
+  return Response.json({ ok: true, message: "If that email is registered, you will receive a reset link." }, { headers: cors });
+}
+async function handleResetPassword(request, env, cors) {
+  const { token, password } = await request.json();
+  if (!token || !password || password.length < 6) {
+    return Response.json({ ok: false, error: "Token and password (min 6 chars) required" }, { headers: cors, status: 400 });
+  }
+  const userId = await env.SESSIONS.get(`reset:${token}`);
+  if (!userId) {
+    return Response.json({ ok: false, error: "Invalid or expired reset link" }, { headers: cors, status: 400 });
+  }
+  const user = JSON.parse(await env.DATA.get(`user:${userId}`) || "null");
+  if (!user) return Response.json({ ok: false, error: "User not found" }, { headers: cors, status: 404 });
+  user.password_hash = await hashPassword(password);
+  await env.DATA.put(`user:${userId}`, JSON.stringify(user));
+  await env.SESSIONS.delete(`reset:${token}`);
+  return Response.json({ ok: true, message: "Password updated. You can now log in." }, { headers: cors });
 }
 async function handleDocUpload(request, env, cors) {
   const userId = await requireAuth(request, env);

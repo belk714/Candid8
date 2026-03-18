@@ -200,6 +200,32 @@
       </div>
       <button type="submit" class="btn" id="authBtn">Log In</button>
       <div class="error-msg" id="authError"></div>
+      <p id="forgotLink" style="text-align:center;margin-top:12px"><a href="#" onclick="showForgotPassword(event)" style="color:var(--accent);font-size:.85rem;text-decoration:none">Forgot password?</a></p>
+    </form>
+    <!-- Forgot Password Form -->
+    <form id="forgotForm" style="display:none" onsubmit="handleForgot(event)">
+      <p style="color:var(--text-muted);font-size:.9rem;margin-bottom:16px">Enter your email and we'll send you a reset link.</p>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="forgotEmail" required placeholder="you@email.com">
+      </div>
+      <button type="submit" class="btn" id="forgotBtn">Send Reset Link</button>
+      <div class="error-msg" id="forgotError"></div>
+      <p style="text-align:center;margin-top:12px"><a href="#" onclick="showAuthTab('login')" style="color:var(--accent);font-size:.85rem;text-decoration:none">← Back to login</a></p>
+    </form>
+    <!-- Reset Password Form -->
+    <form id="resetForm" style="display:none" onsubmit="handleReset(event)">
+      <p style="color:var(--text-muted);font-size:.9rem;margin-bottom:16px">Enter your new password.</p>
+      <div class="form-group">
+        <label>New Password</label>
+        <input type="password" id="resetPassword" required placeholder="••••••••" minlength="6">
+      </div>
+      <div class="form-group">
+        <label>Confirm Password</label>
+        <input type="password" id="resetConfirm" required placeholder="••••••••" minlength="6">
+      </div>
+      <button type="submit" class="btn" id="resetBtn">Reset Password</button>
+      <div class="error-msg" id="resetError"></div>
     </form>
   </div>
 
@@ -403,7 +429,14 @@
     let obProfileData = null;
 
     // ── Init ──
-    if (token && currentUser) {
+    // Check for password reset token in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('reset')) {
+      document.getElementById('authForm').style.display = 'none';
+      document.getElementById('forgotForm').style.display = 'none';
+      document.getElementById('resetForm').style.display = '';
+      document.querySelector('.auth-tabs').style.display = 'none';
+    } else if (token && currentUser) {
       if (currentUser.approved === false) {
         showWaitlistMessage();
       } else {
@@ -435,10 +468,72 @@
     // ── Auth ──
     function showAuthTab(mode) {
       authMode = mode;
+      document.getElementById('authForm').style.display = '';
+      document.getElementById('forgotForm').style.display = 'none';
+      document.getElementById('resetForm').style.display = 'none';
+      document.querySelector('.auth-tabs').style.display = '';
+      document.getElementById('forgotLink').style.display = mode === 'login' ? '' : 'none';
       document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
       document.querySelector(`.auth-tab:${mode === 'login' ? 'first-child' : 'last-child'}`).classList.add('active');
       document.getElementById('authBtn').textContent = mode === 'login' ? 'Log In' : 'Sign Up';
       document.getElementById('authError').textContent = '';
+    }
+
+    function showForgotPassword(e) {
+      e.preventDefault();
+      document.getElementById('authForm').style.display = 'none';
+      document.getElementById('forgotForm').style.display = '';
+      document.getElementById('resetForm').style.display = 'none';
+      document.querySelector('.auth-tabs').style.display = 'none';
+      document.getElementById('forgotError').textContent = '';
+    }
+
+    async function handleForgot(e) {
+      e.preventDefault();
+      const email = document.getElementById('forgotEmail').value;
+      const btn = document.getElementById('forgotBtn');
+      const err = document.getElementById('forgotError');
+      btn.disabled = true; btn.textContent = 'Sending...';
+      try {
+        const res = await fetch(`${API}/auth/forgot`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        err.style.color = 'var(--green)';
+        err.textContent = '✓ If that email is registered, you\'ll receive a reset link shortly.';
+      } catch (ex) {
+        err.style.color = 'var(--red)';
+        err.textContent = 'Something went wrong. Try again.';
+      }
+      btn.disabled = false; btn.textContent = 'Send Reset Link';
+    }
+
+    async function handleReset(e) {
+      e.preventDefault();
+      const pw = document.getElementById('resetPassword').value;
+      const confirm = document.getElementById('resetConfirm').value;
+      const btn = document.getElementById('resetBtn');
+      const err = document.getElementById('resetError');
+      if (pw !== confirm) { err.textContent = 'Passwords don\'t match'; return; }
+      btn.disabled = true; btn.textContent = 'Resetting...';
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('reset');
+        const res = await fetch(`${API}/auth/reset`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, password: pw })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        err.style.color = 'var(--green)';
+        err.textContent = '✓ Password reset! Redirecting to login...';
+        setTimeout(() => { window.location.href = '/app.html'; }, 2000);
+      } catch (ex) {
+        err.style.color = 'var(--red)';
+        err.textContent = ex.message || 'Reset failed. The link may have expired.';
+      }
+      btn.disabled = false; btn.textContent = 'Reset Password';
     }
 
     async function handleAuth(e) {
