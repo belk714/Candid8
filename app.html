@@ -633,10 +633,15 @@
           badge.className = 'score-badge ' + scoreClass(data.match.score);
         }
 
-        // Hide the rough estimate note and button
+        // Hide the rough estimate note, button, and stale breakdown details
         if (btn) btn.style.display = 'none';
         const roughNote = card.querySelector(`#detail-${jobId} .quick-view > p[style*="italic"]`);
         if (roughNote) roughNote.style.display = 'none';
+        // Hide all old breakdown-detail blocks (stale keyword matching stats)
+        card.querySelectorAll(`#detail-${jobId} .breakdown-detail`).forEach(el => el.style.display = 'none');
+        // Update summary text
+        const summaryP = quickView.querySelector(':scope > p');
+        if (summaryP && b.recommendation) summaryP.textContent = b.recommendation;
 
         // Update the quick-view bars with detailed scores
         const quickView = card.querySelector(`#detail-${jobId} .quick-view`);

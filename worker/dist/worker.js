@@ -35753,8 +35753,20 @@ async function computeMatches(userId, env, profile) {
   if (!profile.embedding || jobIds.length === 0) return;
   const matchIds = [];
   for (const jobId of jobIds) {
-    const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
+    let job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
     if (!job || !job.embedding) continue;
+    if (!job.structured_requirements) {
+      try {
+        const descText = job.full_description || job.description || "";
+        if (descText.length > 50) {
+          const sr2 = await parseStructuredRequirements(env, job.title, job.company, descText);
+          job.structured_requirements = JSON.stringify(sr2);
+          await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
+        }
+      } catch (e2) {
+        console.error("Backfill structured requirements failed for", job.title, e2.message);
+      }
+    }
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);

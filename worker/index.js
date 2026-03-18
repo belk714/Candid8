@@ -583,8 +583,22 @@ async function computeMatches(userId, env, profile) {
   const matchIds = [];
   
   for (const jobId of jobIds) {
-    const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
+    let job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
     if (!job || !job.embedding) continue;
+
+    // Backfill structured requirements on-the-fly if missing
+    if (!job.structured_requirements) {
+      try {
+        const descText = job.full_description || job.description || '';
+        if (descText.length > 50) {
+          const sr = await parseStructuredRequirements(env, job.title, job.company, descText);
+          job.structured_requirements = JSON.stringify(sr);
+          await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
+        }
+      } catch (e) {
+        console.error('Backfill structured requirements failed for', job.title, e.message);
+      }
+    }
 
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
@@ -634,7 +648,7 @@ function generateBreakdown(profile, job, cosinePct) {
     sr = job.structured_requirements ? JSON.parse(job.structured_requirements) : null;
   } catch (e) { sr = null; }
 
-  // If no structured requirements, fall back to legacy text-matching logic
+  // If no structured requirements, fall back to legacy — BUT use full_description if available
   if (!sr) {
     return generateBreakdownLegacy(profile, job, cosinePct);
   }
