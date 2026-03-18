@@ -35545,7 +35545,8 @@ async function rebuildProfile(userId, env) {
   }
   if (!allText.trim()) throw new Error("No valid document text found. All docs may have failed extraction.");
   const structured = await parseResumeWithOpenAI(env, allText);
-  const embedding = await getEmbedding(env, JSON.stringify(structured));
+  const embeddingText = buildEmbeddingText(structured);
+  const embedding = await getEmbedding(env, embeddingText);
   const profile = {
     structured_data: structured,
     embedding,
@@ -35755,15 +35756,15 @@ async function computeMatches(userId, env, profile) {
     const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
     if (!job || !job.embedding) continue;
     const jobEmb = JSON.parse(job.embedding);
-    const score = cosineSimilarity(profile.embedding, jobEmb);
-    const pctScore = Math.round(score * 100);
-    const breakdown = generateBreakdown(profile.structured_data, job, pctScore);
+    const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
+    const cosinePct = Math.round(cosineScore * 100);
+    const breakdown = generateBreakdown(profile.structured_data, job, cosinePct);
     const matchId = uuid();
     const match = {
       id: matchId,
       user_id: userId,
       job_id: jobId,
-      score: pctScore,
+      score: breakdown.overall,
       breakdown: JSON.stringify(breakdown),
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     };
@@ -35772,16 +35773,192 @@ async function computeMatches(userId, env, profile) {
   }
   await env.DATA.put(`user_matches:${userId}`, JSON.stringify(matchIds));
 }
-function generateBreakdown(profile, job, score) {
+function normalizeSkill(s2) {
+  return (s2 || "").toLowerCase().replace(/[\s\/\-_]+/g, " ").trim();
+}
+function skillsOverlap(userSkill, jobSkill) {
+  const a2 = normalizeSkill(userSkill);
+  const b2 = normalizeSkill(jobSkill);
+  if (a2 === b2) return true;
+  if (a2.includes(b2) || b2.includes(a2)) return true;
+  const aWords = a2.split(" ").filter((w2) => w2.length >= 3);
+  const bWords = b2.split(" ").filter((w2) => w2.length >= 3);
+  if (aWords.length === 0 || bWords.length === 0) return false;
+  const commonWords = aWords.filter((w2) => bWords.some((bw) => bw.includes(w2) || w2.includes(bw)));
+  return commonWords.length >= Math.ceil(Math.min(aWords.length, bWords.length) * 0.6);
+}
+function generateBreakdown(profile, job, cosinePct) {
+  let sr2 = null;
+  try {
+    sr2 = job.structured_requirements ? JSON.parse(job.structured_requirements) : null;
+  } catch (e2) {
+    sr2 = null;
+  }
+  if (!sr2) {
+    return generateBreakdownLegacy(profile, job, cosinePct);
+  }
+  const sk = profile?.skills || {};
+  const isNewFormat = !!sk.technical_domain;
+  const allUserSkillObjects = [];
+  if (isNewFormat) {
+    const cats = ["technical_domain", "tools_platforms", "methodologies", "leadership_consulting", "industry_knowledge", "soft_skills"];
+    for (const cat of cats) {
+      for (const s2 of sk[cat] || []) {
+        allUserSkillObjects.push({ skill: typeof s2 === "string" ? s2 : s2.skill, depth: s2.depth || "familiar", years: s2.years || 0, category: cat });
+      }
+    }
+  }
+  const userTechSkills = sk.technical || (isNewFormat ? allUserSkillObjects.filter((s2) => s2.category !== "soft_skills").map((s2) => s2.skill) : []);
+  const userSoftSkills = sk.soft || (isNewFormat ? allUserSkillObjects.filter((s2) => s2.category === "soft_skills").map((s2) => s2.skill) : []);
+  const allUserSkills = isNewFormat ? allUserSkillObjects.map((s2) => s2.skill) : [...userTechSkills, ...userSoftSkills];
+  const userIndustries = profile?.industries || [];
+  const userYoe = profile?.years_of_experience || 0;
+  const userEducation = (profile?.education || []).map((e2) => (e2.degree || e2 || "").toString().toLowerCase());
+  const userCerts = (profile?.certifications || []).map((c2) => (typeof c2 === "string" ? c2 : c2.name || "").toLowerCase());
+  const reqSkills = sr2.required_skills || [];
+  const prefSkills = sr2.preferred_skills || [];
+  const reqMatched = reqSkills.filter((rs2) => allUserSkills.some((us2) => skillsOverlap(us2, rs2)));
+  const reqMissing = reqSkills.filter((rs2) => !allUserSkills.some((us2) => skillsOverlap(us2, rs2)));
+  const prefMatched = prefSkills.filter((ps2) => allUserSkills.some((us2) => skillsOverlap(us2, ps2)));
+  const reqSkillScore = reqSkills.length > 0 ? reqMatched.length / reqSkills.length * 100 : 70;
+  const prefSkillScore = prefSkills.length > 0 ? prefMatched.length / prefSkills.length * 100 : 50;
+  const skillsScore = Math.round(reqSkillScore * 0.8 + prefSkillScore * 0.2);
+  const jobMinYoe = sr2.min_years_experience || 0;
+  let expScore, expFit;
+  if (jobMinYoe === 0) {
+    expScore = 80;
+    expFit = "match";
+  } else if (userYoe >= jobMinYoe) {
+    expScore = userYoe <= jobMinYoe * 1.5 ? 95 : 80;
+    expFit = userYoe <= jobMinYoe * 1.5 ? "match" : "over";
+  } else {
+    const ratio = userYoe / jobMinYoe;
+    expScore = ratio >= 0.7 ? 65 : ratio >= 0.5 ? 45 : 25;
+    expFit = "under";
+  }
+  const seniorityLevels = { "entry": 1, "mid": 2, "senior": 3, "director": 4, "vp": 5, "c-suite": 6 };
+  const jobSeniority = sr2.seniority_level || "mid";
+  const jobSenLevel = seniorityLevels[jobSeniority] || 2;
+  const userSenLevel = userYoe >= 20 ? 5 : userYoe >= 15 ? 4 : userYoe >= 8 ? 3 : userYoe >= 3 ? 2 : 1;
+  const senDiff = Math.abs(userSenLevel - jobSenLevel);
+  const seniorityScore = senDiff === 0 ? 95 : senDiff === 1 ? 75 : senDiff === 2 ? 50 : 30;
+  const seniorityFit = userSenLevel === jobSenLevel ? "match" : userSenLevel > jobSenLevel ? "overqualified" : "underqualified";
+  const jobIndustries = sr2.industries || [];
+  const indMatched = jobIndustries.filter((ji2) => userIndustries.some(
+    (ui2) => ui2.toLowerCase().includes(ji2.toLowerCase()) || ji2.toLowerCase().includes(ui2.toLowerCase())
+  ));
+  const industryScore = jobIndustries.length > 0 ? indMatched.length > 0 ? Math.round(indMatched.length / jobIndustries.length * 100) : 20 : 60;
+  const jobEdu = (sr2.education_required || "").toLowerCase();
+  let eduScore = 60;
+  if (!jobEdu || jobEdu === "none") {
+    eduScore = 80;
+  } else {
+    const hasMatch = userEducation.some((ue2) => ue2.includes("master") || ue2.includes("mba") || ue2.includes("phd") || ue2.includes("doctorate") || jobEdu.includes("bachelor") && (ue2.includes("bachelor") || ue2.includes("master") || ue2.includes("mba") || ue2.includes("phd")) || jobEdu.includes("master") && (ue2.includes("master") || ue2.includes("mba") || ue2.includes("phd")) || ue2.includes(jobEdu));
+    eduScore = hasMatch ? 90 : 40;
+  }
+  const jobCerts = (sr2.certifications_preferred || []).map((c2) => c2.toLowerCase());
+  const certsMatched = jobCerts.filter((jc2) => userCerts.some((uc2) => uc2.includes(jc2) || jc2.includes(uc2)));
+  const certScore = jobCerts.length > 0 ? certsMatched.length > 0 ? 85 : 50 : 70;
+  const structuredScore = Math.round(
+    skillsScore * 0.35 + expScore * 0.2 + seniorityScore * 0.1 + industryScore * 0.15 + eduScore * 0.1 + certScore * 0.1
+  );
+  const overall = Math.round(structuredScore * 0.7 + cosinePct * 0.3);
+  return {
+    overall,
+    cosine_score: cosinePct,
+    structured_score: structuredScore,
+    skills_match: Math.min(100, Math.max(0, skillsScore)),
+    skills_detail: {
+      required_skills_matched: reqMatched,
+      required_skills_missing: reqMissing,
+      preferred_skills_matched: prefMatched,
+      total_required: reqSkills.length,
+      total_preferred: prefSkills.length
+    },
+    experience_match: Math.min(100, expScore),
+    experience_detail: {
+      years: userYoe,
+      job_min_years: jobMinYoe,
+      experience_fit: expFit,
+      reason: `${userYoe} years vs ${jobMinYoe} required (${expFit})`
+    },
+    seniority_fit: seniorityFit,
+    seniority_score: seniorityScore,
+    seniority_detail: {
+      job_level: jobSeniority,
+      inferred_user_level: Object.keys(seniorityLevels).find((k2) => seniorityLevels[k2] === userSenLevel) || "mid"
+    },
+    industry_match: Math.min(100, industryScore),
+    industry_detail: {
+      profile_industries: userIndustries,
+      job_industries: jobIndustries,
+      industry_overlap: indMatched,
+      job_category: job.category || ""
+    },
+    education_match: eduScore,
+    certification_match: certScore,
+    matched_skills: [...reqMatched, ...prefMatched].slice(0, 8),
+    // New taxonomy-aware fields
+    skill_coverage: isNewFormat ? computeSkillCoverage(allUserSkillObjects, reqSkills) : null,
+    matched_skill_categories: isNewFormat ? categorizeMatchedSkills(allUserSkillObjects, reqMatched) : null,
+    missing_skill_categories: isNewFormat ? categorizeMissingSkills(allUserSkillObjects, reqMissing) : null,
+    summary: `${overall}% match for ${job.title} at ${job.company}. ${reqMatched.length}/${reqSkills.length} required skills matched.${isNewFormat ? ` ${profile.skills?.skill_count || allUserSkills.length} total profile skills.` : ""}`
+  };
+}
+function computeSkillCoverage(userSkillObjects, requiredSkills) {
+  if (!requiredSkills.length) return { proficient_plus_pct: 100, total_pct: 100 };
+  let totalMatched = 0, proficientMatched = 0;
+  for (const rs2 of requiredSkills) {
+    const match = userSkillObjects.find((us2) => skillsOverlap(us2.skill, rs2));
+    if (match) {
+      totalMatched++;
+      if (match.depth === "expert" || match.depth === "proficient") proficientMatched++;
+    }
+  }
+  return {
+    proficient_plus_pct: Math.round(proficientMatched / requiredSkills.length * 100),
+    total_pct: Math.round(totalMatched / requiredSkills.length * 100)
+  };
+}
+function categorizeMatchedSkills(userSkillObjects, matchedSkills) {
+  const result = {};
+  for (const ms2 of matchedSkills) {
+    const obj = userSkillObjects.find((us2) => skillsOverlap(us2.skill, ms2));
+    const cat = obj ? obj.category : "unknown";
+    if (!result[cat]) result[cat] = [];
+    result[cat].push({ skill: ms2, depth: obj?.depth || "familiar", years: obj?.years || 0 });
+  }
+  return result;
+}
+function categorizeMissingSkills(userSkillObjects, missingSkills) {
+  return missingSkills;
+}
+function generateBreakdownLegacy(profile, job, score) {
   const desc = (job.description || "").toLowerCase();
   const titleDesc = ((job.title || "") + " " + (job.description || "")).toLowerCase();
-  const techSkills = profile?.skills?.technical || [];
-  const softSkills = profile?.skills?.soft || [];
+  const sk = profile?.skills || {};
+  const isNewFormat = !!sk.technical_domain;
+  let techSkills, softSkills;
+  if (isNewFormat) {
+    techSkills = [...sk.technical_domain || [], ...sk.tools_platforms || [], ...sk.methodologies || [], ...sk.leadership_consulting || [], ...sk.industry_knowledge || []].map((s2) => typeof s2 === "string" ? s2 : s2.skill);
+    softSkills = (sk.soft_skills || []).map((s2) => typeof s2 === "string" ? s2 : s2.skill);
+  } else {
+    techSkills = sk.technical || [];
+    softSkills = sk.soft || [];
+  }
   const allSkills = [...techSkills, ...softSkills];
-  const matchedTech = techSkills.filter((s2) => titleDesc.includes(s2.toLowerCase()));
-  const unmatchedTech = techSkills.filter((s2) => !titleDesc.includes(s2.toLowerCase()));
-  const matchedSoft = softSkills.filter((s2) => titleDesc.includes(s2.toLowerCase()));
-  const unmatchedSoft = softSkills.filter((s2) => !titleDesc.includes(s2.toLowerCase()));
+  function skillMatchesText(skill, text) {
+    if (text.includes(skill.toLowerCase())) return true;
+    const words = skill.toLowerCase().split(/[\s\/\-]+/).filter((w2) => w2.length >= 3);
+    if (words.length === 0) return false;
+    if (words.length === 1) return text.includes(words[0]);
+    const found = words.filter((w2) => text.includes(w2));
+    return found.length >= Math.ceil(words.length * 0.6);
+  }
+  const matchedTech = techSkills.filter((s2) => skillMatchesText(s2, titleDesc));
+  const unmatchedTech = techSkills.filter((s2) => !skillMatchesText(s2, titleDesc));
+  const matchedSoft = softSkills.filter((s2) => skillMatchesText(s2, titleDesc));
+  const unmatchedSoft = softSkills.filter((s2) => !skillMatchesText(s2, titleDesc));
   const totalMatched = matchedTech.length + matchedSoft.length;
   const skillsPct = allSkills.length ? Math.round(totalMatched / allSkills.length * 100) : score;
   const profileIndustries = profile?.industries || [];
@@ -35830,6 +36007,7 @@ function generateBreakdown(profile, job, score) {
 async function generateDetailedBreakdown(env, profile, job) {
   const profileSummary = JSON.stringify({
     skills: profile.skills,
+    skill_count: profile.skill_count,
     job_history: profile.job_history,
     education: profile.education,
     certifications: profile.certifications,
@@ -35987,7 +36165,7 @@ ${text.substring(0, 15e3)}` }],
   }
 }
 async function parseResumeWithOpenAI(env, text) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+  const pass1Res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "Authorization": `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -35995,31 +36173,145 @@ async function parseResumeWithOpenAI(env, text) {
       messages: [
         {
           role: "system",
-          content: `You are a resume parser. Extract structured data from the provided resume text. Return valid JSON only with this exact schema:
+          content: `You are an expert resume analyst. Your job is COMPREHENSIVE skill extraction \u2014 err on the side of MORE skills, not fewer. For an experienced professional you should find 60-120+ skills.
+
+Extract skills from EVERY section separately:
+
+1. **Per job role**: What technical skills, tools, methodologies, and soft skills did THIS specific role require or demonstrate? Include implied skills (e.g. "managed a team of 10" implies People Management, Team Leadership, Performance Reviews).
+2. **Education**: What domain skills does each degree imply? (e.g. MBA \u2192 Financial Analysis, Strategic Planning, Organizational Behavior)
+3. **Certifications**: What does each cert prove competency in? (e.g. PMP \u2192 Project Scheduling, Risk Management, Stakeholder Management)
+4. **Achievements/accomplishments**: What capability does each achievement demonstrate? (e.g. "increased revenue 40%" \u2192 Revenue Growth, P&L Management, Sales Strategy)
+5. **Tools/platforms/software**: Everything mentioned or reasonably implied
+6. **Industry knowledge**: Domain expertise areas
+
+Return valid JSON with this schema:
 {
-  "skills": { "technical": ["..."], "soft": ["..."] },
-  "job_history": [{ "title": "...", "company": "...", "duration": "...", "industry": "..." }],
-  "education": [{ "degree": "...", "school": "...", "year": "..." }],
-  "certifications": ["..."],
+  "roles": [{"title": "...", "company": "...", "duration": "...", "industry": "...", "skills_demonstrated": ["skill1", "skill2", ...]}],
+  "education": [{"degree": "...", "school": "...", "year": "...", "derived_skills": ["..."]}],
+  "certifications": [{"name": "...", "derived_skills": ["..."]}],
+  "achievement_skills": ["skill1", "skill2"],
+  "tools_and_platforms": ["tool1", "tool2"],
+  "industry_domains": ["domain1", "domain2"],
   "years_of_experience": 0,
-  "industries": ["..."],
-  "summary": "Brief 2-sentence professional summary"
+  "raw_skill_list": ["every", "single", "skill", "found"]
 }`
         },
         { role: "user", content: text.substring(0, 1e4) }
       ],
-      max_tokens: 2e3,
+      max_tokens: 4e3,
       response_format: { type: "json_object" }
     })
   });
-  const data = await res.json();
-  if (data.error) {
-    throw new Error("OpenAI error: " + (data.error.message || JSON.stringify(data.error)));
+  const pass1Data = await pass1Res.json();
+  if (pass1Data.error) throw new Error("OpenAI error (pass 1): " + (pass1Data.error.message || JSON.stringify(pass1Data.error)));
+  if (!pass1Data.choices || !pass1Data.choices[0]) throw new Error("Failed to parse resume: no choices returned (pass 1)");
+  const rawExtraction = pass1Data.choices[0].message.content;
+  const pass2Res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a skills taxonomy expert. Take the raw skill extraction and organize it into a clean, deduplicated taxonomy. Merge near-duplicates (e.g. "Project Mgmt" and "Project Management"). Infer depth from context (years in role, seniority, how prominently featured).
+
+Return valid JSON with this EXACT schema:
+{
+  "skills": {
+    "technical_domain": [{"skill": "...", "category": "...", "years": 0, "depth": "expert|proficient|familiar", "last_used": "2024", "source_roles": ["role1"]}],
+    "tools_platforms": [{"skill": "...", "category": "...", "depth": "expert|proficient|familiar", "source_roles": ["..."]}],
+    "methodologies": [{"skill": "...", "depth": "expert|proficient|familiar", "source_roles": ["..."]}],
+    "leadership_consulting": [{"skill": "...", "depth": "expert|proficient|familiar", "source_roles": ["..."]}],
+    "industry_knowledge": [{"skill": "...", "depth": "expert|proficient|familiar", "years": 0}],
+    "soft_skills": [{"skill": "...", "depth": "expert|proficient|familiar", "source_roles": ["..."]}]
+  },
+  "skill_count": 0,
+  "job_history": [{"title": "...", "company": "...", "duration": "...", "industry": "...", "key_skills": ["skill1", "skill2"]}],
+  "education": [{"degree": "...", "school": "...", "year": "...", "derived_skills": ["..."]}],
+  "certifications": [{"name": "...", "derived_skills": ["..."]}],
+  "years_of_experience": 0,
+  "industries": ["..."],
+  "summary": "Brief 2-3 sentence professional summary"
+}
+
+Rules:
+- skill_count must equal the total number of unique skills across all categories
+- depth: "expert" = 5+ years or primary focus, "proficient" = 2-5 years or regular use, "familiar" = mentioned/used briefly
+- Aim for 60-120+ skills for experienced professionals
+- Every skill from the raw extraction should appear in exactly one category
+- Also generate backward-compatible flat arrays: include "technical" and "soft" keys inside "skills" as flat string arrays (union of all technical_domain + tools_platforms + methodologies skills, and soft_skills respectively)`
+        },
+        { role: "user", content: rawExtraction.substring(0, 1e4) }
+      ],
+      max_tokens: 4e3,
+      response_format: { type: "json_object" }
+    })
+  });
+  const pass2Data = await pass2Res.json();
+  if (pass2Data.error) throw new Error("OpenAI error (pass 2): " + (pass2Data.error.message || JSON.stringify(pass2Data.error)));
+  if (!pass2Data.choices || !pass2Data.choices[0]) throw new Error("Failed to parse resume: no choices returned (pass 2)");
+  const result = JSON.parse(pass2Data.choices[0].message.content);
+  const sk = result.skills || {};
+  if (!sk.technical || !sk.technical.length) {
+    const techFlat = [];
+    for (const cat of ["technical_domain", "tools_platforms", "methodologies"]) {
+      if (Array.isArray(sk[cat])) techFlat.push(...sk[cat].map((s2) => typeof s2 === "string" ? s2 : s2.skill));
+    }
+    sk.technical = techFlat;
   }
-  if (data.choices && data.choices[0]) {
-    return JSON.parse(data.choices[0].message.content);
+  if (!sk.soft || !sk.soft.length) {
+    const softFlat = [];
+    for (const cat of ["leadership_consulting", "soft_skills"]) {
+      if (Array.isArray(sk[cat])) softFlat.push(...sk[cat].map((s2) => typeof s2 === "string" ? s2 : s2.skill));
+    }
+    sk.soft = softFlat;
   }
-  throw new Error("Failed to parse resume: no choices returned");
+  result.skills = sk;
+  if (!result.skill_count && !sk.skill_count) {
+    let count = 0;
+    for (const cat of ["technical_domain", "tools_platforms", "methodologies", "leadership_consulting", "industry_knowledge", "soft_skills"]) {
+      if (Array.isArray(sk[cat])) count += sk[cat].length;
+    }
+    sk.skill_count = count;
+  }
+  return result;
+}
+function buildEmbeddingText(profile) {
+  const parts = [];
+  parts.push(profile.summary || "");
+  parts.push(`${profile.years_of_experience || 0} years of experience.`);
+  if (profile.industries?.length) parts.push(`Industries: ${profile.industries.join(", ")}.`);
+  const sk = profile.skills || {};
+  const cats = ["technical_domain", "tools_platforms", "methodologies", "leadership_consulting", "industry_knowledge", "soft_skills"];
+  for (const cat of cats) {
+    const items = sk[cat];
+    if (Array.isArray(items) && items.length) {
+      const label = cat.replace(/_/g, " ");
+      const skillTexts = items.map((s2) => {
+        if (typeof s2 === "string") return s2;
+        let t2 = s2.skill;
+        if (s2.years) t2 += ` (${s2.years} years)`;
+        if (s2.depth) t2 += ` [${s2.depth}]`;
+        return t2;
+      });
+      parts.push(`${label}: ${skillTexts.join(", ")}.`);
+    }
+  }
+  if (!sk.technical_domain && sk.technical) parts.push(`Technical skills: ${sk.technical.join(", ")}.`);
+  if (!sk.soft_skills && sk.soft) parts.push(`Soft skills: ${sk.soft.join(", ")}.`);
+  if (profile.job_history?.length) {
+    parts.push("Work history: " + profile.job_history.map((j2) => `${j2.title} at ${j2.company} (${j2.duration || ""}, ${j2.industry || ""})`).join("; ") + ".");
+  }
+  if (profile.education?.length) {
+    parts.push("Education: " + profile.education.map((e2) => `${e2.degree} from ${e2.school}`).join("; ") + ".");
+  }
+  const certs = profile.certifications || [];
+  if (certs.length) {
+    const certNames = certs.map((c2) => typeof c2 === "string" ? c2 : c2.name).filter(Boolean);
+    if (certNames.length) parts.push(`Certifications: ${certNames.join(", ")}.`);
+  }
+  return parts.join("\n").substring(0, 8e3);
 }
 async function getEmbedding(env, text) {
   const res = await fetch("https://api.openai.com/v1/embeddings", {
@@ -36033,6 +36325,61 @@ async function getEmbedding(env, text) {
   const data = await res.json();
   if (data.data && data.data[0]) return data.data[0].embedding;
   throw new Error("Embedding failed");
+}
+async function scrapeFullDescription(url) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Candid8/1.0" }, redirect: "follow" });
+    const html = await res.text();
+    const match = html.match(/adp-body[^>]*>([\s\S]*?)<\/section/);
+    if (match) {
+      const fullDesc = match[1].replace(/<[^>]+>/g, "\n").replace(/\n\s*\n/g, "\n").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#\d+;/g, "").replace(/&nbsp;/g, " ").trim();
+      if (fullDesc.length > 50) return fullDesc;
+    }
+  } catch (e2) {
+    console.error("Scrape failed for", url, e2.message);
+  }
+  return null;
+}
+async function parseStructuredRequirements(env, title, company, description) {
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `Extract structured requirements from the job description. Return valid JSON only with this schema:
+{
+  "required_skills": ["..."],
+  "preferred_skills": ["..."],
+  "min_years_experience": 0,
+  "seniority_level": "entry|mid|senior|director|vp|c-suite",
+  "industries": ["..."],
+  "education_required": "...",
+  "certifications_preferred": ["..."],
+  "key_responsibilities": ["..."]
+}
+If a field can't be determined, use empty array/string or 0. For seniority_level, infer from title and description.`
+          },
+          { role: "user", content: `Title: ${title}
+Company: ${company}
+Description: ${(description || "").substring(0, 4e3)}` }
+        ],
+        max_tokens: 1e3,
+        response_format: { type: "json_object" }
+      })
+    });
+    const data = await res.json();
+    if (data.choices && data.choices[0]) {
+      return JSON.parse(data.choices[0].message.content);
+    }
+  } catch (e2) {
+    console.error("Structured parsing failed:", e2.message);
+  }
+  return null;
 }
 async function generateSearchQueries(env, profile) {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -36053,7 +36400,7 @@ Examples: "petroleum engineer", "strategy manager energy", "production engineer 
 
 Profile:
 - ALL job titles held: ${(profile.job_history || []).map((j2) => j2.title).join(", ")}
-- Skills: ${JSON.stringify(profile.skills)}
+- Skills: ${JSON.stringify(profile.skills?.technical_domain ? { technical: (profile.skills.technical_domain || []).map((s2) => typeof s2 === "string" ? s2 : s2.skill), tools: (profile.skills.tools_platforms || []).map((s2) => typeof s2 === "string" ? s2 : s2.skill), methodologies: (profile.skills.methodologies || []).map((s2) => typeof s2 === "string" ? s2 : s2.skill) } : profile.skills)}
 - Industries: ${JSON.stringify(profile.industries)}
 - ${profile.years_of_experience} years experience
 - Education: ${(profile.education || []).map((e2) => e2.degree).join(", ")}
@@ -36140,11 +36487,29 @@ async function handleSyncAdzunaJobs(request, env, cors) {
   const newJobIds = [];
   let embedded = 0;
   let failed = 0;
+  let scraped = 0;
+  let structured = 0;
   for (const j2 of newJobs) {
     const id = uuid();
+    let fullDescription = null;
+    try {
+      fullDescription = await scrapeFullDescription(j2.url);
+      if (fullDescription) scraped++;
+      await new Promise((r2) => setTimeout(r2, 500));
+    } catch (e2) {
+      console.error("Scrape error for:", j2.title, e2.message);
+    }
+    const descriptionForEmbedding = fullDescription || j2.description;
+    let structuredReqs = null;
+    try {
+      structuredReqs = await parseStructuredRequirements(env, j2.title, j2.company, descriptionForEmbedding);
+      if (structuredReqs) structured++;
+    } catch (e2) {
+      console.error("Structured parse error for:", j2.title, e2.message);
+    }
     let embedding = null;
     try {
-      embedding = await getEmbedding(env, `${j2.title} at ${j2.company}. ${j2.location}. ${j2.category}. ${j2.description}`);
+      embedding = await getEmbedding(env, `${j2.title} at ${j2.company}. ${j2.location}. ${j2.category}. ${descriptionForEmbedding}`);
       embedded++;
     } catch (e2) {
       failed++;
@@ -36160,6 +36525,8 @@ async function handleSyncAdzunaJobs(request, env, cors) {
       company: j2.company,
       location: j2.location,
       description: j2.description,
+      full_description: fullDescription || null,
+      structured_requirements: structuredReqs ? JSON.stringify(structuredReqs) : null,
       salary_min: j2.salary_min,
       salary_max: j2.salary_max,
       url: j2.url,
@@ -36193,6 +36560,8 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     new_jobs: newJobIds.length,
     duplicates_skipped: allJobs.length - newJobs.length,
     new_embedded: embedded,
+    new_scraped: scraped,
+    new_structured: structured,
     backfilled,
     queries_used: queries.length
   }, { headers: cors });

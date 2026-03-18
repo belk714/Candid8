@@ -375,13 +375,39 @@
           html += `<div class="card"><p style="font-size:1.05rem">${p.summary}</p></div>`;
         }
 
-        // Skills
-        html += '<div class="card"><h3>Skills</h3>';
-        if (p.skills?.technical?.length) {
-          html += '<div class="profile-section"><h4>Technical</h4><div class="tags">' + p.skills.technical.map(s => `<span class="tag">${s}</span>`).join('') + '</div></div>';
+        // Skills — supports new taxonomy format and legacy flat arrays
+        html += '<div class="card"><h3>Skills';
+        if (p.skills?.skill_count || p.skill_count) html += ` · ${p.skills?.skill_count || p.skill_count} identified`;
+        html += '</h3>';
+        const skillCats = [
+          { key: 'technical_domain', label: 'Technical & Domain', cls: 'tag' },
+          { key: 'tools_platforms', label: 'Tools & Platforms', cls: 'tag' },
+          { key: 'methodologies', label: 'Methodologies', cls: 'tag' },
+          { key: 'leadership_consulting', label: 'Leadership & Consulting', cls: 'tag soft' },
+          { key: 'industry_knowledge', label: 'Industry Knowledge', cls: 'tag soft' },
+          { key: 'soft_skills', label: 'Soft Skills', cls: 'tag soft' },
+        ];
+        let hasNewFormat = false;
+        for (const cat of skillCats) {
+          const items = p.skills?.[cat.key];
+          if (Array.isArray(items) && items.length) {
+            hasNewFormat = true;
+            const tags = items.map(s => {
+              const name = typeof s === 'string' ? s : s.skill;
+              const depth = typeof s === 'object' && s.depth ? s.depth : '';
+              const title = depth ? `title="${depth}"` : '';
+              return `<span class="${cat.cls}" ${title}>${name}</span>`;
+            }).join('');
+            html += `<div class="profile-section"><h4>${cat.label} (${items.length})</h4><div class="tags">${tags}</div></div>`;
+          }
         }
-        if (p.skills?.soft?.length) {
-          html += '<div class="profile-section"><h4>Soft Skills</h4><div class="tags">' + p.skills.soft.map(s => `<span class="tag soft">${s}</span>`).join('') + '</div></div>';
+        if (!hasNewFormat) {
+          if (p.skills?.technical?.length) {
+            html += '<div class="profile-section"><h4>Technical</h4><div class="tags">' + p.skills.technical.map(s => `<span class="tag">${s}</span>`).join('') + '</div></div>';
+          }
+          if (p.skills?.soft?.length) {
+            html += '<div class="profile-section"><h4>Soft Skills</h4><div class="tags">' + p.skills.soft.map(s => `<span class="tag soft">${s}</span>`).join('') + '</div></div>';
+          }
         }
         html += '</div>';
 
