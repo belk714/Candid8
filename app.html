@@ -863,8 +863,8 @@
                   ${isDetailed ? `
                     <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.recommendation || b.summary || ''}</p>
                     ${breakdownBar('Skills', b.skills_match)}
-                    ${b.matched_skills?.length ? `<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--green)">✓ Matched:</span> ${b.matched_skills.map(s=>\`<span class="tag" style="font-size:.7rem">\${s}</span>\`).join(' ')}</div></div>` : ''}
-                    ${b.missing_skills?.length ? `<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--yellow)">✗ Gaps:</span> ${b.missing_skills.map(s=>\`<span class="tag" style="font-size:.7rem;opacity:.5">\${s}</span>\`).join(' ')}</div></div>` : ''}
+                    ${b.matched_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--green)">✓ Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div></div>' : ''}
+                    ${b.missing_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--yellow)">✗ Gaps:</span> ' + b.missing_skills.map(function(s){return '<span class="tag" style="font-size:.7rem;opacity:.5">'+s+'</span>'}).join(' ') + '</div></div>' : ''}
                     ${breakdownBar('Experience', b.experience_match)}
                     ${b.experience_analysis ? `<div class="breakdown-detail"><span class="detail-stat" style="font-size:.8rem">${b.experience_analysis}</span></div>` : ''}
                     ${breakdownBar('Industry', b.industry_match)}
@@ -953,15 +953,15 @@
           quickView.innerHTML = `
             ${b.recommendation ? `<p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">💡 ${b.recommendation}</p>` : ''}
             ${breakdownBar('Skills', b.skills_match)}
-            ${b.matched_skills?.length ? `<div style="margin:4px 0 8px"><span style="color:var(--green);font-size:.8rem;font-weight:600">✓ Matched:</span> ${b.matched_skills.map(s=>\`<span class="tag" style="font-size:.7rem">\${s}</span>\`).join(' ')}</div>` : ''}
-            ${b.missing_skills?.length ? `<div style="margin:4px 0 8px"><span style="color:var(--yellow);font-size:.8rem;font-weight:600">✗ Gaps:</span> ${b.missing_skills.map(s=>\`<span class="tag" style="font-size:.7rem;opacity:.5">\${s}</span>\`).join(' ')}</div>` : ''}
+            ${b.matched_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--green);font-size:.8rem;font-weight:600">✓ Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div>' : ''}
+            ${b.missing_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--yellow);font-size:.8rem;font-weight:600">✗ Gaps:</span> ' + b.missing_skills.map(function(s){return '<span class="tag" style="font-size:.7rem;opacity:.5">'+s+'</span>'}).join(' ') + '</div>' : ''}
             ${breakdownBar('Experience', b.experience_match)}
-            ${b.experience_analysis ? `<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">${b.experience_analysis}</p>` : ''}
+            ${b.experience_analysis ? '<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">' + b.experience_analysis + '</p>' : ''}
             ${breakdownBar('Industry', b.industry_match)}
-            ${b.industry_analysis ? `<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">${b.industry_analysis}</p>` : ''}
+            ${b.industry_analysis ? '<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">' + b.industry_analysis + '</p>' : ''}
             ${breakdownBar('Education', b.education_match)}
-            ${b.strengths?.length ? `<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">✓ Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.strengths.map(s=>\`<li>\${s}</li>\`).join('')}</ul></div>` : ''}
-            ${b.gaps?.length ? `<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">⚠ Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.gaps.map(s=>\`<li>\${s}</li>\`).join('')}</ul></div>` : ''}
+            ${b.strengths?.length ? '<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">✓ Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.strengths.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
+            ${b.gaps?.length ? '<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">⚠ Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.gaps.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
           `;
           // Re-add full description details and link
           if (details) quickView.appendChild(details);
