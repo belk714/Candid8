@@ -35760,7 +35760,8 @@ async function route(url, request, env, cors) {
       if (!m2) continue;
       const job = JSON.parse(await env.DATA.get(`job:${m2.job_id}`) || "null");
       if (!job) continue;
-      matches.push({ title: job.title, company: job.company, cosine_pct: m2.cosine_pct, score: m2.score });
+      const sr2 = job.structured_requirements ? JSON.parse(job.structured_requirements) : null;
+      matches.push({ title: job.title, company: job.company, cosine_pct: m2.cosine_pct, score: m2.score, has_sr: !!sr2, req_skills: sr2?.required_skills?.length || 0, pref_skills: sr2?.preferred_skills?.length || 0, desc_len: (job.description || "").length });
     }
     matches.sort((a2, b2) => (b2.score ?? b2.cosine_pct ?? 0) - (a2.score ?? a2.cosine_pct ?? 0));
     return Response.json({ ok: true, count: matches.length, matches }, { headers: cors });
@@ -37265,7 +37266,7 @@ async function parseStructuredRequirements(env, title, company, description) {
         messages: [
           {
             role: "system",
-            content: `Extract structured requirements from the job description. Return valid JSON only with this schema:
+            content: `Extract structured requirements from the job posting. Return valid JSON only with this schema:
 {
   "required_skills": ["..."],
   "preferred_skills": ["..."],
@@ -37276,7 +37277,16 @@ async function parseStructuredRequirements(env, title, company, description) {
   "certifications_preferred": ["..."],
   "key_responsibilities": ["..."]
 }
-If a field can't be determined, use empty array/string or 0. For seniority_level, infer from title and description.`
+
+CRITICAL RULES:
+1. ALWAYS populate required_skills with at least 5-8 skills. If the description doesn't list specific skills, INFER them from the job title and responsibilities. For example:
+   - "Strategy Manager" \u2192 Strategic Planning, Business Analysis, Stakeholder Management, Data Analysis, Project Management
+   - "Change Management Lead" \u2192 Change Management, Organizational Development, Communication, Training, Stakeholder Engagement
+   - "Energy Consultant" \u2192 Energy Industry Knowledge, Technical Analysis, Client Relationship Management, Problem Solving
+2. Infer seniority_level from the title (Manager=senior, Director=director, VP=vp, Lead=senior, Consultant=mid)
+3. Infer industries from the company name and context
+4. For min_years_experience, estimate from seniority (entry=0-2, mid=3-5, senior=5-8, director=8-12, vp=12+)
+5. NEVER return empty required_skills \u2014 a job always requires skills`
           },
           { role: "user", content: `Title: ${title}
 Company: ${company}
