@@ -1370,17 +1370,49 @@ function normalizeSkill(s) {
   return (s || '').toLowerCase().replace(/[\s\/\-_]+/g, ' ').trim();
 }
 
+// Synonym groups for fuzzy skill matching
+const SKILL_SYNONYMS = [
+  ['management', 'managing', 'manager'],
+  ['analysis', 'analytics', 'analytical', 'analyzing'],
+  ['planning', 'strategy', 'strategic'],
+  ['engagement', 'management', 'relations'],
+  ['building', 'development', 'developing'],
+  ['leadership', 'leading', 'leader'],
+  ['consulting', 'advisory', 'consultant'],
+  ['coaching', 'mentoring', 'mentorship'],
+  ['transformation', 'change', 'innovation'],
+  ['operations', 'operational', 'operating'],
+  ['engineering', 'engineer', 'technical'],
+  ['communication', 'communications'],
+  ['data', 'analytics', 'analysis'],
+  ['program', 'project', 'portfolio'],
+  ['oil', 'petroleum', 'energy'],
+  ['gas', 'petroleum', 'energy'],
+];
+
+function wordsAreSynonyms(w1, w2) {
+  if (w1 === w2) return true;
+  if (w1.includes(w2) || w2.includes(w1)) return true;
+  return SKILL_SYNONYMS.some(group => {
+    const has1 = group.some(s => s.includes(w1) || w1.includes(s));
+    const has2 = group.some(s => s.includes(w2) || w2.includes(s));
+    return has1 && has2;
+  });
+}
+
 function skillsOverlap(userSkill, jobSkill) {
   const a = normalizeSkill(userSkill);
   const b = normalizeSkill(jobSkill);
   if (a === b) return true;
   if (a.includes(b) || b.includes(a)) return true;
-  // Check if significant words overlap (for multi-word skills)
+  // Check if significant words overlap (with synonym support)
   const aWords = a.split(' ').filter(w => w.length >= 3);
   const bWords = b.split(' ').filter(w => w.length >= 3);
   if (aWords.length === 0 || bWords.length === 0) return false;
-  const commonWords = aWords.filter(w => bWords.some(bw => bw.includes(w) || w.includes(bw)));
-  return commonWords.length >= Math.ceil(Math.min(aWords.length, bWords.length) * 0.6);
+  const commonWords = aWords.filter(w => bWords.some(bw => wordsAreSynonyms(w, bw)));
+  // For 2-word skills, require at least 1 word match; for longer, require 50%
+  const minWords = aWords.length <= 2 && bWords.length <= 2 ? 1 : Math.ceil(Math.min(aWords.length, bWords.length) * 0.5);
+  return commonWords.length >= minWords;
 }
 
 function generateBreakdown(profile, job, cosinePct) {

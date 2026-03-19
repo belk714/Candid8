@@ -36413,6 +36413,33 @@ async function computeMatches(userId, env, profile) {
 function normalizeSkill(s2) {
   return (s2 || "").toLowerCase().replace(/[\s\/\-_]+/g, " ").trim();
 }
+var SKILL_SYNONYMS = [
+  ["management", "managing", "manager"],
+  ["analysis", "analytics", "analytical", "analyzing"],
+  ["planning", "strategy", "strategic"],
+  ["engagement", "management", "relations"],
+  ["building", "development", "developing"],
+  ["leadership", "leading", "leader"],
+  ["consulting", "advisory", "consultant"],
+  ["coaching", "mentoring", "mentorship"],
+  ["transformation", "change", "innovation"],
+  ["operations", "operational", "operating"],
+  ["engineering", "engineer", "technical"],
+  ["communication", "communications"],
+  ["data", "analytics", "analysis"],
+  ["program", "project", "portfolio"],
+  ["oil", "petroleum", "energy"],
+  ["gas", "petroleum", "energy"]
+];
+function wordsAreSynonyms(w1, w2) {
+  if (w1 === w2) return true;
+  if (w1.includes(w2) || w2.includes(w1)) return true;
+  return SKILL_SYNONYMS.some((group) => {
+    const has1 = group.some((s2) => s2.includes(w1) || w1.includes(s2));
+    const has2 = group.some((s2) => s2.includes(w2) || w2.includes(s2));
+    return has1 && has2;
+  });
+}
 function skillsOverlap(userSkill, jobSkill) {
   const a2 = normalizeSkill(userSkill);
   const b2 = normalizeSkill(jobSkill);
@@ -36421,8 +36448,9 @@ function skillsOverlap(userSkill, jobSkill) {
   const aWords = a2.split(" ").filter((w2) => w2.length >= 3);
   const bWords = b2.split(" ").filter((w2) => w2.length >= 3);
   if (aWords.length === 0 || bWords.length === 0) return false;
-  const commonWords = aWords.filter((w2) => bWords.some((bw) => bw.includes(w2) || w2.includes(bw)));
-  return commonWords.length >= Math.ceil(Math.min(aWords.length, bWords.length) * 0.6);
+  const commonWords = aWords.filter((w2) => bWords.some((bw) => wordsAreSynonyms(w2, bw)));
+  const minWords = aWords.length <= 2 && bWords.length <= 2 ? 1 : Math.ceil(Math.min(aWords.length, bWords.length) * 0.5);
+  return commonWords.length >= minWords;
 }
 function generateBreakdown(profile, job, cosinePct) {
   let sr2 = null;
