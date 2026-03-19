@@ -859,6 +859,8 @@
           const missingDetail = m.missing_skills_detail || b.missing_skills_detail || [];
           const missingSimple = m.missing_skills || b.missing_skills || b.skills_detail?.required_skills_missing || [];
           const whyJob = m.why_this_job || b.why_this_job || '';
+          const hasDeepDive = !!b.deep_dive;
+          const narrativeText = b.narrative || '';
           return `
             <div class="match-card" onclick="if(!event.target.closest('details,a,button,.tag'))toggleMatchQuick(this,'${m.job.id}')">
               <div class="match-header">
@@ -909,7 +911,12 @@
                     ${m.job.url ? `<a href="${m.job.url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
                     <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px" onclick="event.stopPropagation();saveJob('${m.job.id}')" id="save-btn-${m.job.id}">⭐ Save</button>
                   </div>
-                  ${!isDetailed ? `<button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">🔬 AI Deep Dive</button>` : ''}
+                  ${hasDeepDive ? `
+                    <details style="margin:8px 0 12px" onclick="event.stopPropagation()">
+                      <summary style="cursor:pointer;font-size:.85rem;color:var(--accent)">🔬 View Analysis</summary>
+                      <div style="font-size:.85rem;color:var(--text-muted);margin-top:8px;padding:12px;background:var(--surface2);border-radius:8px;line-height:1.5">${narrativeText || b.recommendation || b.summary || 'Analysis available.'}</div>
+                    </details>
+                  ` : !isDetailed ? `<button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">🔬 AI Deep Dive</button>` : ''}
                   <div id="detailed-${m.job.id}"></div>
                 </div>
               </div>
