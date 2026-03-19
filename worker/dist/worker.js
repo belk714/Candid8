@@ -35772,7 +35772,13 @@ async function autoDeepDiveHighMatches(env, newJobIds) {
             if (!job) return;
             const analysis = await generateDeepDiveNarrative(env, profile.structured_data, job);
             const breakdown = JSON.parse(match.breakdown || "{}");
-            Object.assign(breakdown, analysis, { deep_dive: true, detailed: true });
+            breakdown.deep_dive_analysis = analysis;
+            breakdown.narrative = analysis.narrative;
+            breakdown.strengths = analysis.strengths;
+            breakdown.gaps = analysis.gaps;
+            breakdown.recommendation = analysis.recommendation;
+            breakdown.deep_dive = true;
+            breakdown.detailed = true;
             match.breakdown = JSON.stringify(breakdown);
             await env.DATA.put(`match:${match.id}`, JSON.stringify(match));
             console.log(`Deep dive complete: ${job.title} (${match.score}%) for user ${userId}`);
@@ -35873,6 +35879,11 @@ async function route(url, request, env, cors) {
   }
   if (path === "/api/admin/profile" && method === "PATCH") return handleAdminPatchProfile(url, request, env, cors);
   if (path === "/api/admin/invite" && method === "POST") return handleAdminInvite(url, request, env, cors);
+  if (path === "/api/admin/clear-index" && method === "POST") {
+    requirePin(url);
+    await env.DATA.put("jobs_index", JSON.stringify([]));
+    return Response.json({ ok: true, message: "Index cleared" }, { headers: cors });
+  }
   if (path === "/api/admin/debug-filters" && method === "GET") {
     requirePin(url);
     const userId = url.searchParams.get("user_id");
@@ -36540,7 +36551,13 @@ async function handleGetMatchDetail(request, env, cors, jobId) {
   if (!breakdown.detailed) {
     try {
       const analysis = await generateDetailedBreakdown(env, profile.structured_data, job);
-      breakdown = { ...breakdown, ...analysis, detailed: true };
+      breakdown.deep_dive_analysis = analysis;
+      breakdown.narrative = analysis.narrative;
+      breakdown.strengths = analysis.strengths;
+      breakdown.gaps = analysis.gaps;
+      breakdown.recommendation = analysis.recommendation;
+      breakdown.detailed = true;
+      breakdown.deep_dive = true;
       const weights = { skills_match: 0.4, experience_match: 0.25, industry_match: 0.2, education_match: 0.1, certification_match: 0.05 };
       let weightedScore = 0, totalWeight = 0;
       for (const [key, weight] of Object.entries(weights)) {
@@ -36819,7 +36836,10 @@ function generateBreakdown(profile, job, cosinePct, skillEmbeddings) {
   const jobCerts = (sr2.certifications_preferred || []).map((c2) => c2.toLowerCase());
   const certsMatched = jobCerts.filter((jc2) => userCerts.some((uc2) => uc2.includes(jc2) || jc2.includes(uc2)));
   const certBonus = certsMatched.length > 0 ? 3 : 0;
-  const overall = Math.min(100, Math.round(skillsPct * 0.8 + expBonus + eduBonus + industryBonus + certBonus));
+  const totalBonuses = expBonus + eduBonus + industryBonus + certBonus;
+  const skillsComponent = skillsPct * 0.8;
+  const scaledBonuses = totalBonuses * (skillsPct / 100);
+  const overall = Math.min(100, Math.round(skillsComponent + scaledBonuses));
   const matchedSkillNames = [...reqResult.full_matches.map((m2) => m2.job_skill), ...prefResult.full_matches.map((m2) => m2.job_skill)];
   const missingSkillsDetail = reqResult.gaps.map((g2) => ({
     skill: g2.job_skill,
@@ -37122,16 +37142,13 @@ async function handleJobSearchAnalyze(request, env, cors) {
   const breakdown = generateBreakdown(profile.structured_data, tempJob, cosinePct);
   try {
     const detailed = await generateDetailedBreakdown(env, profile.structured_data, tempJob);
-    Object.assign(breakdown, detailed, { detailed: true });
-    const weights = { skills_match: 0.3, experience_match: 0.3, industry_match: 0.2, education_match: 0.1, leadership_match: 0.1 };
-    let ws2 = 0, tw = 0;
-    for (const [k2, w2] of Object.entries(weights)) {
-      if (breakdown[k2] != null) {
-        ws2 += breakdown[k2] * w2;
-        tw += w2;
-      }
-    }
-    if (tw > 0) breakdown.overall = Math.round(ws2 / tw);
+    breakdown.deep_dive_analysis = detailed;
+    breakdown.narrative = detailed.narrative;
+    breakdown.strengths = detailed.strengths;
+    breakdown.gaps = detailed.gaps;
+    breakdown.recommendation = detailed.recommendation;
+    breakdown.detailed = true;
+    breakdown.deep_dive = true;
   } catch (e2) {
   }
   return Response.json({
@@ -37655,24 +37672,8 @@ async function handleSyncAdzunaJobs(request, env, cors) {
         const batch = newJobIds.slice(i2, i2 + 5);
         await Promise.all(batch.map(async (jobId) => {
           const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
-          if (!job || !job.url) return;
-          try {
-            const fullDesc = await scrapeFullDescription(job.url);
-            if (fullDesc && fullDesc.length > (job.description || "").length) {
-              job.full_description = fullDesc;
-              await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
-            }
-          } catch (e2) {
-            console.error("Scrape failed:", job.title, e2.message);
-          }
-        }));
-      }
-      for (let i2 = 0; i2 < newJobIds.length; i2 += 5) {
-        const batch = newJobIds.slice(i2, i2 + 5);
-        await Promise.all(batch.map(async (jobId) => {
-          const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
           if (!job) return;
-          const descForParsing = job.full_description || job.description || "";
+          const descForParsing = job.description || "";
           try {
             if (descForParsing.length > 30 || job.title) {
               const sr2 = await parseStructuredRequirements(env, job.title, job.company, descForParsing || job.title);
