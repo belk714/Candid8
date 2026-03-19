@@ -36700,8 +36700,17 @@ function generateBreakdown(profile, job, cosinePct, skillEmbeddings) {
   const userYoe = profile?.years_of_experience || 0;
   const userEducation = (profile?.education || []).map((e2) => (e2.degree || e2 || "").toString().toLowerCase());
   const userCerts = (profile?.certifications || []).map((c2) => (typeof c2 === "string" ? c2 : c2.name || "").toLowerCase());
-  const reqSkills = sr2.required_skills || [];
-  const prefSkills = sr2.preferred_skills || [];
+  const rawReqSkills = sr2.required_skills || [];
+  const rawPrefSkills = sr2.preferred_skills || [];
+  const reqSkills = rawReqSkills.map((s2) => typeof s2 === "string" ? s2 : s2.skill);
+  const prefSkills = rawPrefSkills.map((s2) => typeof s2 === "string" ? s2 : s2.skill);
+  const skillSourceMap = {};
+  for (const s2 of rawReqSkills) {
+    if (typeof s2 === "object" && s2.skill) skillSourceMap[s2.skill] = s2.source || "explicit";
+  }
+  for (const s2 of rawPrefSkills) {
+    if (typeof s2 === "object" && s2.skill) skillSourceMap[s2.skill] = s2.source || "explicit";
+  }
   const reqResult = matchSkillsViaEmbeddings(skillEmbeddings || {}, reqSkills, null);
   const prefResult = matchSkillsViaEmbeddings(skillEmbeddings || {}, prefSkills, null);
   for (const rs2 of reqSkills) {
@@ -36720,10 +36729,15 @@ function generateBreakdown(profile, job, cosinePct, skillEmbeddings) {
       prefResult.gaps = prefResult.gaps.filter((g2) => g2.job_skill !== ps2);
     }
   }
-  const reqTotal = reqSkills.length || 1;
-  const prefTotal = prefSkills.length || 1;
-  const reqScore = (reqResult.full_matches.length * 1 + reqResult.partial_matches.length * 0.5) / reqTotal * 100;
-  const prefScore = (prefResult.full_matches.length * 1 + prefResult.partial_matches.length * 0.5) / prefTotal * 100;
+  function sourceWeight(skillName) {
+    return skillSourceMap[skillName] === "inferred" ? 0.5 : 1;
+  }
+  const reqWeightedTotal = reqSkills.reduce((sum, s2) => sum + sourceWeight(s2), 0) || 1;
+  const prefWeightedTotal = prefSkills.reduce((sum, s2) => sum + sourceWeight(s2), 0) || 1;
+  const reqWeightedMatched = reqResult.full_matches.reduce((sum, m2) => sum + sourceWeight(m2.job_skill), 0) + reqResult.partial_matches.reduce((sum, m2) => sum + sourceWeight(m2.job_skill) * 0.5, 0);
+  const prefWeightedMatched = prefResult.full_matches.reduce((sum, m2) => sum + sourceWeight(m2.job_skill), 0) + prefResult.partial_matches.reduce((sum, m2) => sum + sourceWeight(m2.job_skill) * 0.5, 0);
+  const reqScore = reqWeightedMatched / reqWeightedTotal * 100;
+  const prefScore = prefWeightedMatched / prefWeightedTotal * 100;
   const depthMultiplier = { expert: 1.15, advanced: 1.1, proficient: 1.05, intermediate: 1, basic: 0.95, familiar: 0.9 };
   let depthBonus = 0;
   if (isNewFormat) {
@@ -36731,7 +36745,7 @@ function generateBreakdown(profile, job, cosinePct, skillEmbeddings) {
       const obj = allUserSkillObjects.find((us2) => normalizeSkill(us2.skill) === normalizeSkill(fm.user_skill));
       if (obj) depthBonus += (depthMultiplier[obj.depth] || 1) - 1;
     }
-    depthBonus = reqTotal > 0 ? depthBonus / reqTotal : 0;
+    depthBonus = reqWeightedTotal > 0 ? depthBonus / reqWeightedTotal : 0;
   }
   let skillsPct = Math.min(100, Math.round((reqScore * 0.7 + prefScore * 0.3) * (1 + depthBonus)));
   const jobMinYoe = sr2.min_years_experience || 0;
@@ -37321,7 +37335,7 @@ function buildNormalizedEmbeddingText(type, data) {
     return `Skills: ${allSkills.join(", ")} | ${yoe} years experience | Industries: ${industries.join(", ")} | Seniority: ${senLevel} | Education: ${education.join(", ")} | Certifications: ${certs.join(", ")}`;
   }
   if (type === "job") {
-    const skills = [...data.required_skills || [], ...data.preferred_skills || []];
+    const skills = [...data.required_skills || [], ...data.preferred_skills || []].map((s2) => typeof s2 === "string" ? s2 : s2.skill);
     const yoe = data.min_years_experience || 0;
     const industries = data.industries || [];
     const seniority = data.seniority_level || "mid";
@@ -37376,21 +37390,30 @@ async function parseStructuredRequirements(env, title, company, description) {
             role: "system",
             content: `Extract structured requirements from the job posting. Return valid JSON only with this schema:
 {
-  "required_skills": ["..."],
-  "preferred_skills": ["..."],
+  "required_skills": [{"skill": "...", "source": "explicit|inferred"}],
+  "preferred_skills": [{"skill": "...", "source": "explicit|inferred"}],
   "min_years_experience": 0,
   "seniority_level": "entry|mid|senior|director|vp|c-suite",
   "industries": ["..."],
   "education_required": "...",
   "certifications_preferred": ["..."],
-  "key_responsibilities": ["..."]
+  "key_responsibilities": ["..."],
+  "description_quality": "full|partial|thin"
 }
 
+SKILL SOURCE RULES:
+- "explicit" = the skill is directly mentioned in the description text OR clearly required by a specific listed responsibility (e.g. "must have experience with Python" \u2192 explicit)
+- "inferred" = the skill is assumed/implied based on the job title or general role type but NOT mentioned in the description (e.g. title is "Project Manager" so you assume "Stakeholder Management" \u2192 inferred)
+- For detailed descriptions with specific requirements: most skills should be "explicit", minimize inference
+- For thin/generic descriptions: OK to infer skills from the title, but mark them as "inferred"
+
+DESCRIPTION QUALITY:
+- "full" = >1500 chars with specific requirements, tools, or responsibilities listed
+- "partial" = 500-1500 chars or moderately detailed
+- "thin" = <500 chars or very generic/boilerplate
+
 CRITICAL RULES:
-1. ALWAYS populate required_skills with at least 5-8 skills. If the description doesn't list specific skills, INFER them from the job title and responsibilities. For example:
-   - "Strategy Manager" \u2192 Strategic Planning, Business Analysis, Stakeholder Management, Data Analysis, Project Management
-   - "Change Management Lead" \u2192 Change Management, Organizational Development, Communication, Training, Stakeholder Engagement
-   - "Energy Consultant" \u2192 Energy Industry Knowledge, Technical Analysis, Client Relationship Management, Problem Solving
+1. ALWAYS populate required_skills with at least 5-8 skills. If the description doesn't list specific skills, INFER them from the job title and responsibilities but mark source as "inferred".
 2. Infer seniority_level from the title (Manager=senior, Director=director, VP=vp, Lead=senior, Consultant=mid)
 3. Infer industries from the company name and context
 4. For min_years_experience, estimate from seniority (entry=0-2, mid=3-5, senior=5-8, director=8-12, vp=12+)
