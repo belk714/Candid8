@@ -5,81 +5,87 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Candid8 — Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
-      --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a26; --border: #1e1e2e;
-      --text: #e4e4e7; --text-muted: #71717a; --accent: #6366f1; --accent-hover: #818cf8;
-      --accent-glow: rgba(99, 102, 241, 0.15); --green: #22c55e; --yellow: #eab308; --red: #ef4444;
+      --bg: #ffffff; --bg-alt: #f8f9fa; --surface: #ffffff; --surface2: #f3f4f6;
+      --border: #e5e7eb; --border-light: #f0f1f3;
+      --navy: #1a2332; --navy-light: #2d3a4a;
+      --text: #1a2332; --text-muted: #6b7280; --text-light: #9ca3af;
+      --accent: #1a2332; --accent-hover: #2d3a4a;
+      --green: #16a34a; --green-bg: #f0fdf4; --green-border: #bbf7d0;
+      --amber: #d97706; --amber-bg: #fffbeb; --amber-border: #fde68a;
+      --red: #dc2626; --red-bg: #fef2f2; --red-border: #fecaca;
     }
-    body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh; }
-    
+    body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-alt); color: var(--text); line-height: 1.6; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+
     /* Auth Screen */
-    .auth-container { max-width: 400px; margin: 0 auto; padding: 80px 24px; }
-    .auth-container .logo { font-size: 2rem; font-weight: 700; text-align: center; margin-bottom: 40px; }
-    .auth-container .logo span { color: var(--accent); }
-    .auth-tabs { display: flex; gap: 0; margin-bottom: 24px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
-    .auth-tab { flex: 1; padding: 12px; text-align: center; background: var(--surface); cursor: pointer; font-weight: 600; color: var(--text-muted); transition: all .2s; border: none; font-family: inherit; font-size: .95rem; }
-    .auth-tab.active { background: var(--accent); color: white; }
+    .auth-container { max-width: 400px; margin: 0 auto; padding: 100px 24px; }
+    .auth-container .logo { font-family: 'Playfair Display', Georgia, serif; font-size: 2rem; font-weight: 700; text-align: center; margin-bottom: 48px; color: var(--navy); }
+    .auth-tabs { display: flex; gap: 0; margin-bottom: 24px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+    .auth-tab { flex: 1; padding: 12px; text-align: center; background: var(--bg); cursor: pointer; font-weight: 600; color: var(--text-muted); transition: all .2s; border: none; font-family: inherit; font-size: .95rem; }
+    .auth-tab.active { background: var(--navy); color: white; }
     .form-group { margin-bottom: 16px; }
-    .form-group label { display: block; font-size: .85rem; color: var(--text-muted); margin-bottom: 6px; }
-    .form-group input { width: 100%; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 1rem; font-family: inherit; outline: none; transition: border-color .2s; }
-    .form-group input:focus { border-color: var(--accent); }
-    .btn { width: 100%; padding: 14px; border-radius: 10px; border: none; background: var(--accent); color: white; font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; transition: background .2s; }
-    .btn:hover { background: var(--accent-hover); }
+    .form-group label { display: block; font-size: .85rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
+    .form-group input { width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 1rem; font-family: inherit; outline: none; transition: border-color .2s; }
+    .form-group input:focus { border-color: var(--navy); }
+    .btn { width: 100%; padding: 14px; border-radius: 8px; border: none; background: var(--navy); color: white; font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; transition: background .2s; }
+    .btn:hover { background: var(--navy-light); }
     .btn:disabled { opacity: .5; cursor: not-allowed; }
-    .btn-secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+    .btn-secondary { background: var(--bg); border: 1px solid var(--border); color: var(--text); }
     .btn-secondary:hover { background: var(--surface2); }
     .error-msg { color: var(--red); font-size: .85rem; margin-top: 8px; text-align: center; min-height: 1.2em; }
 
     /* Dashboard Layout */
     .app { display: none; }
     .app.active { display: flex; min-height: 100vh; }
-    .sidebar { width: 240px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px 0; flex-shrink: 0; display: flex; flex-direction: column; }
-    .sidebar .logo { font-size: 1.3rem; font-weight: 700; padding: 0 20px; margin-bottom: 32px; }
-    .sidebar .logo span { color: var(--accent); }
-    .nav-item { padding: 10px 20px; cursor: pointer; color: var(--text-muted); font-size: .9rem; font-weight: 500; transition: all .15s; display: flex; align-items: center; gap: 10px; }
-    .nav-item:hover { color: var(--text); background: var(--accent-glow); }
-    .nav-item.active { color: var(--accent); background: var(--accent-glow); border-right: 2px solid var(--accent); }
-    .nav-item .icon { width: 20px; text-align: center; }
+    .sidebar { width: 240px; background: var(--bg); border-right: 1px solid var(--border); padding: 24px 0; flex-shrink: 0; display: flex; flex-direction: column; }
+    .sidebar .logo { font-family: 'Playfair Display', Georgia, serif; font-size: 1.3rem; font-weight: 700; padding: 0 24px; margin-bottom: 36px; color: var(--navy); }
+    .nav-item { padding: 10px 24px; cursor: pointer; color: var(--text-muted); font-size: .9rem; font-weight: 500; transition: all .15s; display: flex; align-items: center; gap: 10px; border-left: 2px solid transparent; }
+    .nav-item:hover { color: var(--text); background: var(--bg-alt); }
+    .nav-item.active { color: var(--navy); background: var(--bg-alt); border-left-color: var(--navy); font-weight: 600; }
+    .nav-item .icon { width: 18px; display: flex; align-items: center; justify-content: center; }
+    .nav-item .icon svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
     .sidebar-spacer { flex: 1; }
-    .sidebar .logout { padding: 10px 20px; cursor: pointer; color: var(--text-muted); font-size: .85rem; transition: color .15s; }
+    .sidebar .logout { padding: 10px 24px; cursor: pointer; color: var(--text-muted); font-size: .85rem; transition: color .15s; }
     .sidebar .logout:hover { color: var(--red); }
-    .main { flex: 1; padding: 32px; overflow-y: auto; max-height: 100vh; }
-    .main h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 24px; }
+    .main { flex: 1; padding: 40px; overflow-y: auto; max-height: 100vh; background: var(--bg-alt); }
+    .main h1 { font-family: 'Playfair Display', Georgia, serif; font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; color: var(--navy); }
 
     /* Cards */
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; margin-bottom: 16px; }
-    .card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; }
+    .card { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 24px; margin-bottom: 16px; }
+    .card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: var(--navy); }
     .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 
     /* Tags */
     .tags { display: flex; flex-wrap: wrap; gap: 6px; }
-    .tag { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: .78rem; font-weight: 500; background: var(--accent-glow); color: var(--accent); }
-    .tag.soft { background: rgba(34,197,94,.12); color: var(--green); }
+    .tag { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: .78rem; font-weight: 500; border: 1px solid var(--border); color: var(--text); background: var(--bg); }
+    .tag.matched { border-color: var(--green-border); color: var(--green); background: var(--green-bg); }
+    .tag.missing { border-color: var(--red-border); color: var(--red); background: var(--red-bg); }
+    .tag.soft { border-color: var(--border); color: var(--text-muted); background: var(--surface2); }
 
     /* Profile */
     .profile-section { margin-bottom: 20px; }
-    .profile-section h4 { font-size: .85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
-    .job-history-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .profile-section h4 { font-size: .8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; font-weight: 600; }
+    .job-history-item { padding: 12px 0; border-bottom: 1px solid var(--border-light); }
     .job-history-item:last-child { border-bottom: none; }
-    .job-history-item .title { font-weight: 600; }
+    .job-history-item .title { font-weight: 600; color: var(--navy); }
     .job-history-item .meta { font-size: .85rem; color: var(--text-muted); }
 
     /* Documents */
-    .drop-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 40px; text-align: center; cursor: pointer; transition: all .2s; margin-bottom: 16px; }
-    .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); background: var(--accent-glow); }
+    .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 40px; text-align: center; cursor: pointer; transition: all .2s; margin-bottom: 16px; background: var(--bg); }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--navy); background: var(--bg-alt); }
     .drop-zone p { color: var(--text-muted); margin-top: 8px; font-size: .9rem; }
     .doc-list { list-style: none; }
-    .doc-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--surface2); border-radius: 10px; margin-bottom: 8px; }
-    .doc-item .name { font-weight: 500; }
+    .doc-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+    .doc-item .name { font-weight: 500; color: var(--text); }
     .doc-item .date { font-size: .8rem; color: var(--text-muted); margin-right: 8px; }
-    .btn-delete { background: none; border: none; cursor: pointer; font-size: 1rem; opacity: 0.5; transition: opacity .2s; padding: 4px 8px; }
-    .btn-delete:hover { opacity: 1; }
-    .loc-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface2); border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    .btn-delete { background: none; border: none; cursor: pointer; font-size: .85rem; color: var(--text-muted); transition: color .2s; padding: 4px 8px; }
+    .btn-delete:hover { color: var(--red); }
+    .loc-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
     .loc-dropdown .loc-option { padding: 10px 14px; cursor: pointer; font-size: .9rem; }
-    .loc-dropdown .loc-option:hover { background: var(--primary); color: #fff; }
+    .loc-dropdown .loc-option:hover { background: var(--bg-alt); }
     .analysis-text { font-size: .8rem; color: var(--text-muted); margin: 2px 0 12px 0; padding-left: 122px; }
     .analysis-pills { font-size: .8rem; margin-bottom: 12px; padding-left: 122px; }
     .breakdown-detail { font-size: .8rem; color: var(--text-muted); margin: 4px 0 14px 122px; padding: 8px 12px; background: var(--surface2); border-radius: 8px; }
@@ -89,59 +95,65 @@
     .tag .remove:hover { opacity: 1; }
 
     /* Matches */
-    .match-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 12px; cursor: pointer; transition: all .15s; }
-    .match-card:hover { border-color: var(--accent); }
+    .match-card { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 12px; cursor: pointer; transition: all .15s; }
+    .match-card:hover { border-color: var(--navy); box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
     .match-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-    .match-info h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; }
-    .match-info .company { color: var(--accent); font-weight: 500; }
+    .match-info h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; color: var(--navy); }
+    .match-info .company { color: var(--navy); font-weight: 500; opacity: 0.7; }
     .match-info .location { font-size: .85rem; color: var(--text-muted); }
-    .match-info .salary { font-size: .85rem; color: var(--green); margin-top: 4px; }
-    .score-badge { font-size: 1.5rem; font-weight: 700; min-width: 64px; text-align: center; padding: 8px 12px; border-radius: 12px; }
-    .score-green { color: var(--green); background: rgba(34,197,94,.1); }
-    .score-yellow { color: var(--yellow); background: rgba(234,179,8,.1); }
-    .score-red { color: var(--red); background: rgba(239,68,68,.1); }
-    .match-detail { display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+    .match-info .salary { font-size: .85rem; color: var(--green); margin-top: 4px; font-weight: 500; }
+    .score-badge { font-size: 1.1rem; font-weight: 700; min-width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; border-radius: 50%; flex-shrink: 0; }
+    .score-green { color: var(--green); background: var(--green-bg); border: 1px solid var(--green-border); }
+    .score-yellow { color: var(--amber); background: var(--amber-bg); border: 1px solid var(--amber-border); }
+    .score-red { color: var(--text-muted); background: var(--surface2); border: 1px solid var(--border); }
+    .match-detail { display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-light); }
     .match-detail.open { display: block; }
     .breakdown-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
     .breakdown-label { font-size: .8rem; color: var(--text-muted); width: 110px; }
-    .breakdown-track { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
-    .breakdown-fill { height: 100%; border-radius: 4px; transition: width .5s; }
+    .breakdown-track { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+    .breakdown-fill { height: 100%; border-radius: 3px; transition: width .5s; }
     .breakdown-val { font-size: .8rem; font-weight: 600; width: 36px; text-align: right; }
 
     /* Settings */
     .settings-form .form-group { margin-bottom: 20px; }
-    .settings-form input, .settings-form select { width: 100%; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 1rem; font-family: inherit; outline: none; }
-    .settings-form input:focus, .settings-form select:focus { border-color: var(--accent); }
+    .settings-form input, .settings-form select { width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 1rem; font-family: inherit; outline: none; }
+    .settings-form input:focus, .settings-form select:focus { border-color: var(--navy); }
     .row { display: flex; gap: 12px; }
     .row > * { flex: 1; }
 
     /* Empty state */
     .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
-    .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .empty-state .icon { font-size: 2rem; margin-bottom: 12px; opacity: 0.4; }
     .empty-state p { max-width: 360px; margin: 0 auto; }
 
     /* Loading */
-    .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+    .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--navy); border-radius: 50%; animation: spin .6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .loading-overlay { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; color: var(--text-muted); }
 
+    /* How It Works Tab */
+    .hiw-step { display: flex; gap: 20px; padding: 24px 0; border-bottom: 1px solid var(--border-light); }
+    .hiw-step:last-child { border-bottom: none; }
+    .hiw-num { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: .85rem; color: var(--navy); flex-shrink: 0; margin-top: 2px; }
+    .hiw-text h3 { font-family: 'Playfair Display', Georgia, serif; font-size: 1rem; font-weight: 600; margin-bottom: 4px; color: var(--navy); }
+    .hiw-text p { font-size: .9rem; color: var(--text-muted); line-height: 1.6; }
+
     /* Mobile */
-    .mobile-header { display: none; padding: 16px 20px; background: var(--surface); border-bottom: 1px solid var(--border); justify-content: space-between; align-items: center; }
-    .mobile-header .logo { font-size: 1.2rem; font-weight: 700; }
-    .mobile-header .logo span { color: var(--accent); }
-    .hamburger { background: none; border: none; color: var(--text); font-size: 1.5rem; cursor: pointer; }
+    .mobile-header { display: none; padding: 16px 20px; background: var(--bg); border-bottom: 1px solid var(--border); justify-content: space-between; align-items: center; }
+    .mobile-header .logo { font-family: 'Playfair Display', Georgia, serif; font-size: 1.2rem; font-weight: 700; color: var(--navy); }
+    .hamburger { background: none; border: none; color: var(--text); font-size: 1.5rem; cursor: pointer; padding: 4px; }
     @media (max-width: 768px) {
-      .sidebar { position: fixed; left: -260px; top: 0; bottom: 0; z-index: 100; transition: left .25s; }
-      .sidebar.open { left: 0; }
+      .sidebar { position: fixed; left: -260px; top: 0; bottom: 0; z-index: 100; transition: left .25s; box-shadow: none; }
+      .sidebar.open { left: 0; box-shadow: 4px 0 20px rgba(0,0,0,0.08); }
       .mobile-header { display: flex; }
       .main { padding: 20px 16px; max-height: none; }
       .app.active { flex-direction: column; }
-      .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 99; }
+      .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 99; }
       .overlay.open { display: block; }
       .match-header { flex-direction: column; }
       .score-badge { align-self: flex-start; }
     }
-    .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 20px; font-size: .9rem; z-index: 200; transform: translateY(100px); opacity: 0; transition: all .3s; }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; font-size: .9rem; z-index: 200; transform: translateY(100px); opacity: 0; transition: all .3s; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
     .toast.show { transform: translateY(0); opacity: 1; }
     .toast.error { border-color: var(--red); color: var(--red); }
     .toast.success { border-color: var(--green); color: var(--green); }
@@ -152,40 +164,40 @@
     .onboarding-card { max-width: 500px; width: 100%; text-align: center; }
     .onboarding-progress { display: flex; justify-content: center; gap: 10px; margin-bottom: 40px; }
     .onboarding-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); transition: all .3s; }
-    .onboarding-dot.active { background: var(--accent); transform: scale(1.3); }
+    .onboarding-dot.active { background: var(--navy); transform: scale(1.3); }
     .onboarding-dot.done { background: var(--green); }
     .onboarding-step { display: none; animation: fadeIn .3s ease; }
     .onboarding-step.active { display: block; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes progressBar { 0% { width: 0%; } 20% { width: 15%; } 40% { width: 35%; } 60% { width: 55%; } 80% { width: 75%; } 95% { width: 90%; } 100% { width: 95%; } }
-    .onboarding-step h2 { font-size: 1.6rem; font-weight: 700; margin-bottom: 12px; }
+    .onboarding-step h2 { font-family: 'Playfair Display', Georgia, serif; font-size: 1.6rem; font-weight: 600; margin-bottom: 12px; color: var(--navy); }
     .onboarding-step p.sub { color: var(--text-muted); margin-bottom: 28px; font-size: .95rem; }
-    .ob-drop-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 40px 20px; cursor: pointer; transition: all .2s; margin-bottom: 20px; }
-    .ob-drop-zone:hover, .ob-drop-zone.dragover { border-color: var(--accent); background: var(--accent-glow); }
-    .ob-drop-zone .icon { font-size: 2.2rem; margin-bottom: 8px; }
+    .ob-drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 40px 20px; cursor: pointer; transition: all .2s; margin-bottom: 20px; background: var(--bg); }
+    .ob-drop-zone:hover, .ob-drop-zone.dragover { border-color: var(--navy); background: var(--bg-alt); }
+    .ob-drop-zone .icon { font-size: 2rem; margin-bottom: 8px; opacity: 0.3; }
     .ob-drop-zone p { color: var(--text-muted); font-size: .9rem; }
     .ob-loading { display: none; padding: 32px; text-align: center; color: var(--text-muted); }
     .ob-loading .spinner { margin: 0 auto 12px; width: 28px; height: 28px; }
-    .ob-summary { display: none; padding: 16px; background: var(--surface); border: 1px solid var(--green); border-radius: 12px; margin-bottom: 16px; color: var(--green); font-weight: 500; }
+    .ob-summary { display: none; padding: 16px; background: var(--green-bg); border: 1px solid var(--green-border); border-radius: 10px; margin-bottom: 16px; color: var(--green); font-weight: 500; }
     .ob-city-tags { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 16px 0; min-height: 36px; }
-    .ob-city-tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--accent-glow); color: var(--accent); border-radius: 8px; font-size: .85rem; font-weight: 500; }
-    .ob-city-tag .remove { cursor: pointer; opacity: .7; }
+    .ob-city-tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: .85rem; font-weight: 500; background: var(--bg); }
+    .ob-city-tag .remove { cursor: pointer; opacity: .5; color: var(--text-muted); }
     .ob-city-tag .remove:hover { opacity: 1; }
     .ob-city-input-wrap { position: relative; margin-bottom: 16px; }
-    .ob-city-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: var(--surface2); border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,.3); display: none; }
+    .ob-city-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.08); display: none; }
     .ob-city-dropdown .opt { padding: 10px 14px; cursor: pointer; font-size: .9rem; }
-    .ob-city-dropdown .opt:hover { background: var(--accent); color: #fff; }
+    .ob-city-dropdown .opt:hover { background: var(--bg-alt); }
     .ob-slider-wrap { text-align: left; margin-bottom: 20px; }
     .ob-slider-wrap label { display: block; font-size: .9rem; margin-bottom: 6px; color: var(--text-muted); }
-    .ob-slider-wrap input[type=range] { width: 100%; }
-    .setup-banner { display: none; padding: 12px 16px; background: rgba(234,179,8,.08); border: 1px solid rgba(234,179,8,.2); border-radius: 10px; margin-bottom: 20px; font-size: .85rem; color: var(--yellow); }
-    .setup-banner a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+    .ob-slider-wrap input[type=range] { width: 100%; accent-color: var(--navy); }
+    .setup-banner { display: none; padding: 12px 16px; background: var(--amber-bg); border: 1px solid var(--amber-border); border-radius: 8px; margin-bottom: 20px; font-size: .85rem; color: var(--amber); }
+    .setup-banner a { color: var(--navy); cursor: pointer; text-decoration: underline; }
   </style>
 </head>
 <body>
   <!-- Auth Screen -->
   <div id="authScreen" class="auth-container">
-    <div class="logo">candid<span>8</span></div>
+    <div class="logo">candid8</div>
     <div class="auth-tabs">
       <button class="auth-tab active" onclick="showAuthTab('login')">Log In</button>
       <button class="auth-tab" onclick="showAuthTab('signup')">Sign Up</button>
@@ -201,7 +213,7 @@
       </div>
       <button type="submit" class="btn" id="authBtn">Log In</button>
       <div class="error-msg" id="authError"></div>
-      <p id="forgotLink" style="text-align:center;margin-top:12px"><a href="#" onclick="showForgotPassword(event)" style="color:var(--accent);font-size:.85rem;text-decoration:none">Forgot password?</a></p>
+      <p id="forgotLink" style="text-align:center;margin-top:12px"><a href="#" onclick="showForgotPassword(event)" style="color:var(--navy);font-size:.85rem;text-decoration:none">Forgot password?</a></p>
     </form>
     <!-- Forgot Password Form -->
     <form id="forgotForm" style="display:none" onsubmit="handleForgot(event)">
@@ -212,7 +224,7 @@
       </div>
       <button type="submit" class="btn" id="forgotBtn">Send Reset Link</button>
       <div class="error-msg" id="forgotError"></div>
-      <p style="text-align:center;margin-top:12px"><a href="#" onclick="showAuthTab('login')" style="color:var(--accent);font-size:.85rem;text-decoration:none">← Back to login</a></p>
+      <p style="text-align:center;margin-top:12px"><a href="#" onclick="showAuthTab('login')" style="color:var(--navy);font-size:.85rem;text-decoration:none">&larr; Back to login</a></p>
     </form>
     <!-- Reset Password Form -->
     <form id="resetForm" style="display:none" onsubmit="handleReset(event)">
@@ -242,7 +254,7 @@
 
       <!-- Step 1: Welcome -->
       <div class="onboarding-step active" id="obStep0">
-        <h2>Welcome to Candid8 🎯</h2>
+        <h2>Welcome to Candid8</h2>
         <p class="sub">We'll get you set up in 3 quick steps so we can start finding jobs that fit.</p>
         <button class="btn" onclick="obNext()">Continue</button>
       </div>
@@ -252,7 +264,7 @@
         <h2>Upload your resume</h2>
         <p class="sub">We'll analyze your skills, experience, and background to build your profile.</p>
         <div class="ob-drop-zone" id="obDropZone" onclick="document.getElementById('obFileInput').click()">
-          <div class="icon">📄</div>
+          <div class="icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></div>
           <p>Drop your resume here or click to browse<br><span style="font-size:.78rem">PDF, DOCX, or TXT</span></p>
         </div>
         <input type="file" id="obFileInput" accept=".pdf,.docx,.doc,.txt" style="display:none">
@@ -260,7 +272,7 @@
           <div class="spinner"></div>
           <p class="ob-upload-status" style="font-weight:500">Reading document...</p>
           <p style="font-size:.85rem;color:var(--text-muted);margin-top:4px">Building your career profile</p>
-          <div style="margin:16px auto;width:80%;max-width:300px;height:4px;background:var(--border);border-radius:4px;overflow:hidden"><div class="ob-progress-fill" style="height:100%;width:0%;background:var(--accent);border-radius:4px;animation:progressBar 45s ease-out forwards"></div></div>
+          <div style="margin:16px auto;width:80%;max-width:300px;height:4px;background:var(--border);border-radius:4px;overflow:hidden"><div class="ob-progress-fill" style="height:100%;width:0%;background:var(--navy);border-radius:4px;animation:progressBar 45s ease-out forwards"></div></div>
         </div>
         <div class="ob-summary" id="obSummary"></div>
         <button class="btn" id="obResumeNext" disabled onclick="obNext()">Continue</button>
@@ -270,21 +282,21 @@
       <div class="onboarding-step" id="obStep2">
         <h2>What are you looking for?</h2>
         <p class="sub">Set your target locations and salary range.</p>
-        <h3 style="font-size:1rem;text-align:left;margin-bottom:8px">📍 Cities (up to 3)</h3>
+        <h3 style="font-size:1rem;text-align:left;margin-bottom:8px">Cities (up to 3)</h3>
         <div class="ob-city-tags" id="obCityTags"></div>
         <div class="ob-city-input-wrap">
-          <input type="text" id="obCityInput" placeholder="Type a major city..." autocomplete="off" style="width:100%;padding:12px 16px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
+          <input type="text" id="obCityInput" placeholder="Type a major city..." autocomplete="off" style="width:100%;padding:12px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
           <div class="ob-city-dropdown" id="obCityDropdown"></div>
         </div>
-        <h3 style="font-size:1rem;text-align:left;margin:20px 0 8px">💰 Salary Range</h3>
+        <h3 style="font-size:1rem;text-align:left;margin:20px 0 8px">Salary Range</h3>
         <div style="display:flex;gap:12px;margin-bottom:20px">
           <div class="form-group" style="flex:1;text-align:left;margin:0">
             <label style="font-size:.85rem">Minimum ($)</label>
-            <input type="number" id="obSalaryMin" placeholder="e.g. 120000" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
+            <input type="number" id="obSalaryMin" placeholder="e.g. 120000" style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
           </div>
           <div class="form-group" style="flex:1;text-align:left;margin:0">
             <label style="font-size:.85rem">Maximum ($)</label>
-            <input type="number" id="obSalaryMax" placeholder="e.g. 200000" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
+            <input type="number" id="obSalaryMax" placeholder="e.g. 200000" style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem;font-family:inherit;outline:none">
           </div>
         </div>
         <button class="btn" id="obCityNext" disabled onclick="obNext()">Continue</button>
@@ -311,18 +323,19 @@
   <div id="appDashboard" class="app">
     <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
     <div class="mobile-header">
-      <div class="logo">candid<span>8</span></div>
-      <button class="hamburger" onclick="toggleSidebar()">☰</button>
+      <div class="logo">candid8</div>
+      <button class="hamburger" onclick="toggleSidebar()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
     </div>
     <aside class="sidebar" id="sidebar">
-      <div class="logo">candid<span>8</span></div>
-      <div class="nav-item active" data-tab="documents" onclick="switchTab('documents')"><span class="icon">📄</span> Documents</div>
-      <div class="nav-item" data-tab="profile" onclick="switchTab('profile')"><span class="icon">📊</span> Profile</div>
-      <div class="nav-item" data-tab="matches" onclick="switchTab('matches')"><span class="icon">🎯</span> Matches</div>
-      <div class="nav-item" data-tab="search" onclick="switchTab('search')"><span class="icon">🔍</span> Search</div>
-      <div class="nav-item" data-tab="saved" onclick="switchTab('saved')"><span class="icon">⭐</span> Saved Jobs</div>
+      <div class="logo">candid8</div>
+      <div class="nav-item active" data-tab="documents" onclick="switchTab('documents')"><span class="icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span> Documents</div>
+      <div class="nav-item" data-tab="profile" onclick="switchTab('profile')"><span class="icon"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Profile</div>
+      <div class="nav-item" data-tab="matches" onclick="switchTab('matches')"><span class="icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span> Matches</div>
+      <div class="nav-item" data-tab="search" onclick="switchTab('search')"><span class="icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span> Search</div>
+      <div class="nav-item" data-tab="saved" onclick="switchTab('saved')"><span class="icon"><svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></span> Saved Jobs</div>
+      <div class="nav-item" data-tab="howitworks" onclick="switchTab('howitworks')"><span class="icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span> How It Works</div>
       <div class="sidebar-spacer"></div>
-      <div class="logout" onclick="logout()">← Log out</div>
+      <div class="logout" onclick="logout()">&larr; Log out</div>
     </aside>
     <main class="main">
       <div class="setup-banner" id="setupBanner"></div>
@@ -335,7 +348,7 @@
       <div class="tab-content" id="tab-documents">
         <h1>Documents</h1>
         <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-          <div style="font-size:2rem">📁</div>
+          <div style="margin-bottom:8px"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
           <p>Drop your resume here or click to browse<br><span style="font-size:.8rem">PDF, DOCX, or TXT</span></p>
         </div>
         <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt" style="display:none" onchange="uploadFile(this.files[0])">
@@ -348,12 +361,12 @@
         <div class="card" style="margin-bottom:20px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <h3 style="margin:0">Filters & Alerts</h3>
-            <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px" onclick="toggleMatchFilters()">⚙️ Edit</button>
+            <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px;width:auto" onclick="toggleMatchFilters()">Edit</button>
           </div>
           <div id="matchFilterSummary" style="font-size:.85rem;color:var(--text-muted)">Loading...</div>
           <div id="matchFilterForm" style="display:none;margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
             <div class="form-group" style="margin-bottom:12px">
-              <label>📍 Cities (max 3) <span style="font-size:.75rem;color:var(--yellow)">★ Required for alerts</span></label>
+              <label>Cities (max 3)</label>
               <div id="matchLocationTags" class="tags" style="margin-bottom:8px"></div>
               <div style="position:relative">
                 <input type="text" id="matchLocInput" placeholder="Type a major city..." autocomplete="off" oninput="filterMatchLocations()" onfocus="filterMatchLocations()">
@@ -362,23 +375,23 @@
             </div>
             <div style="display:flex;gap:12px;margin-bottom:12px">
               <div class="form-group" style="flex:1;margin:0">
-                <label style="font-size:.85rem">💰 Min Salary ($)</label>
+                <label style="font-size:.85rem">Min Salary ($)</label>
                 <input type="number" id="matchSalMin" placeholder="e.g. 120000">
               </div>
               <div class="form-group" style="flex:1;margin:0">
-                <label style="font-size:.85rem">💰 Max Salary ($)</label>
+                <label style="font-size:.85rem">Max Salary ($)</label>
                 <input type="number" id="matchSalMax" placeholder="e.g. 200000">
               </div>
             </div>
             <div class="form-group" style="margin-bottom:12px">
               <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-                <input type="checkbox" id="matchAlertsEnabled" checked style="width:auto;accent-color:var(--accent)">
-                <span>🔔 Enable email alerts</span>
+                <input type="checkbox" id="matchAlertsEnabled" checked style="width:auto;accent-color:var(--navy)">
+                <span>Enable email alerts</span>
               </label>
             </div>
             <div class="form-group" style="margin-bottom:12px">
               <label style="font-size:.85rem">Minimum fit score for alerts: <strong id="matchThreshVal">75</strong>%</label>
-              <input type="range" id="matchAlertThreshold" min="60" max="100" step="5" value="75" oninput="document.getElementById('matchThreshVal').textContent=this.value" style="width:100%">
+              <input type="range" id="matchAlertThreshold" min="60" max="100" step="5" value="75" oninput="document.getElementById('matchThreshVal').textContent=this.value" style="width:100%;accent-color:var(--navy)">
             </div>
             <div class="form-group" style="margin-bottom:16px">
               <label style="font-size:.85rem">Alert email</label>
@@ -388,7 +401,7 @@
           </div>
         </div>
         <!-- Find Jobs Button -->
-        <button class="btn" id="findJobsBtn" onclick="triggerJobSync()" style="width:100%;margin-bottom:20px;padding:14px;font-size:1rem">🔍 Find New Jobs</button>
+        <button class="btn" id="findJobsBtn" onclick="triggerJobSync()" style="width:100%;margin-bottom:20px;padding:14px;font-size:1rem">Find New Jobs</button>
         <!-- Job List -->
         <div id="matchesContent"><div class="loading-overlay"><div class="spinner"></div> Loading matches...</div></div>
       </div>
@@ -402,18 +415,58 @@
         <h1>Search Jobs</h1>
         <div class="card" style="margin-bottom:20px">
           <div style="display:flex;gap:12px;flex-wrap:wrap">
-            <input type="text" id="searchQuery" placeholder="e.g. strategy manager energy" style="flex:1;min-width:200px;padding:14px 18px;border-radius:10px;border:2px solid var(--border);background:var(--surface2);color:var(--text);font-size:1.05rem;font-family:inherit;outline:none;transition:border-color .2s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter')doSearch()">
-            <select id="searchLocation" style="padding:14px 16px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:.95rem;font-family:inherit;outline:none;min-width:160px">
+            <input type="text" id="searchQuery" placeholder="e.g. strategy manager energy" style="flex:1;min-width:200px;padding:14px 18px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem;font-family:inherit;outline:none;transition:border-color .2s" onfocus="this.style.borderColor='var(--navy)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter')doSearch()">
+            <select id="searchLocation" style="padding:14px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:.95rem;font-family:inherit;outline:none;min-width:160px">
               <option value="">Anywhere</option>
             </select>
             <button class="btn" onclick="doSearch()" style="width:auto;padding:14px 28px;white-space:nowrap">Search</button>
           </div>
         </div>
         <div id="searchResults">
-          <div class="empty-state"><div class="icon">🔍</div><p>Search for jobs by keyword. Results are ranked by how well they match your profile.</p></div>
+          <div class="empty-state"><p>Search for jobs by keyword. Results are ranked by how well they match your profile.</p></div>
         </div>
       </div>
-      <!-- Settings tab removed — merged into Matches -->
+      <!-- How It Works Tab -->
+      <div class="tab-content" id="tab-howitworks" style="display:none">
+        <h1>How It Works</h1>
+        <div class="card">
+          <div class="hiw-step">
+            <div class="hiw-num">1</div>
+            <div class="hiw-text">
+              <h3>You upload your resume</h3>
+              <p>We extract 60–120 skills across 6 categories: technical, tools, methodologies, leadership, industry knowledge, and soft skills.</p>
+            </div>
+          </div>
+          <div class="hiw-step">
+            <div class="hiw-num">2</div>
+            <div class="hiw-text">
+              <h3>Every 6 hours, we pull jobs</h3>
+              <p>Hundreds of real openings matched to your skill profile, pulled from across industries and locations you care about.</p>
+            </div>
+          </div>
+          <div class="hiw-step">
+            <div class="hiw-num">3</div>
+            <div class="hiw-text">
+              <h3>Skill-by-skill comparison</h3>
+              <p>Each job's requirements are parsed and compared against yours. We identify matches, gaps, and the closest transferable skills.</p>
+            </div>
+          </div>
+          <div class="hiw-step">
+            <div class="hiw-num">4</div>
+            <div class="hiw-text">
+              <h3>Email alerts with AI analysis</h3>
+              <p>Matches above your threshold are emailed to you with a detailed breakdown — skills matched, gaps identified, and an overall recommendation.</p>
+            </div>
+          </div>
+          <div class="hiw-step">
+            <div class="hiw-num">5</div>
+            <div class="hiw-text">
+              <h3>Jobs you'd never find on your own</h3>
+              <p>The result: roles you're qualified for that you'd never discover on a traditional job board. Cross-industry matches that leverage what you already know.</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 
@@ -432,7 +485,6 @@
     let obProfileData = null;
 
     // ── Init ──
-    // Check for password reset token in URL
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('reset')) {
       document.getElementById('authForm').style.display = 'none';
@@ -455,11 +507,9 @@
           showApp();
           return;
         }
-        // Check if they have a profile (returning user with data but no flag)
         const pRes = await fetch(`${API}/profile`, { headers: authHeaders() });
         const pData = await pRes.json();
         if (pData.ok && pData.profile && pData.profile.structured_data && data.ok && data.settings && data.settings.locations && data.settings.locations.length > 0) {
-          // Already set up, just missing the flag — set it and go to dashboard
           await fetch(`${API}/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ...data.settings, onboarding_complete: true }) });
           showApp();
           return;
@@ -504,7 +554,7 @@
         });
         const data = await res.json();
         err.style.color = 'var(--green)';
-        err.textContent = '✓ If that email is registered, you\'ll receive a reset link shortly.';
+        err.textContent = 'If that email is registered, you\'ll receive a reset link shortly.';
       } catch (ex) {
         err.style.color = 'var(--red)';
         err.textContent = 'Something went wrong. Try again.';
@@ -530,7 +580,7 @@
         const data = await res.json();
         if (!data.ok) throw new Error(data.error);
         err.style.color = 'var(--green)';
-        err.textContent = '✓ Password reset! Redirecting to login...';
+        err.textContent = 'Password reset! Redirecting to login...';
         setTimeout(() => { window.location.href = '/app.html'; }, 2000);
       } catch (ex) {
         err.style.color = 'var(--red)';
@@ -547,7 +597,7 @@
       const err = document.getElementById('authError');
       btn.disabled = true;
       err.textContent = '';
-      
+
       try {
         const res = await fetch(`${API}/auth/${authMode}`, {
           method: 'POST',
@@ -560,8 +610,7 @@
         currentUser = data.user;
         localStorage.setItem('candid8_token', token);
         localStorage.setItem('candid8_user', JSON.stringify(currentUser));
-        
-        // Check approval status
+
         if (!currentUser.approved) {
           showWaitlistMessage();
           return;
@@ -576,11 +625,10 @@
 
     function showWaitlistMessage() {
       document.getElementById('authScreen').innerHTML = `
-        <div class="logo">candid<span>8</span></div>
+        <div class="logo">candid8</div>
         <div style="text-align:center;margin-top:40px">
-          <div style="font-size:2.5rem;margin-bottom:16px">⏳</div>
-          <h2 style="font-size:1.3rem;margin-bottom:12px">You're on the waitlist!</h2>
-          <p style="color:var(--text-muted);font-size:.95rem;max-width:340px;margin:0 auto">Thanks for signing up! We'll email you when your account is activated.</p>
+          <h2 style="font-family:'Playfair Display',Georgia,serif;font-size:1.3rem;margin-bottom:12px">You're on the waitlist</h2>
+          <p style="color:var(--text-muted);font-size:.95rem;max-width:340px;margin:0 auto">Thanks for signing up. We'll email you when your account is activated.</p>
           <button class="btn btn-secondary" style="margin-top:24px;max-width:200px" onclick="logout()">Log out</button>
         </div>`;
     }
@@ -645,7 +693,7 @@
 
     function barColor(v) {
       if (v >= 80) return 'var(--green)';
-      if (v >= 60) return 'var(--yellow)';
+      if (v >= 60) return 'var(--amber)';
       return 'var(--red)';
     }
 
@@ -656,19 +704,19 @@
         const res = await fetch(`${API}/profile`, { headers: authHeaders() });
         const data = await res.json();
         if (!data.ok || !data.profile || !data.profile.structured_data) {
-          el.innerHTML = `<div class="empty-state"><div class="icon">📄</div><h3>No profile yet</h3><p>Upload a resume or document to build your profile automatically.</p><br><button class="btn" style="max-width:200px;margin:0 auto" onclick="switchTab('documents')">Upload Document</button><br><br><button class="btn btn-secondary" style="max-width:220px;margin:0 auto" onclick="rebuildProfile()">🔄 Rebuild Profile</button><p style="font-size:0.8rem;color:var(--text-muted);margin-top:8px">If you already uploaded a doc, click rebuild to re-parse it.</p></div>`;
+          el.innerHTML = `<div class="empty-state"><h3>No profile yet</h3><p>Upload a resume or document to build your profile automatically.</p><br><button class="btn" style="max-width:200px;margin:0 auto" onclick="switchTab('documents')">Upload Document</button><br><br><button class="btn btn-secondary" style="max-width:220px;margin:0 auto" onclick="rebuildProfile()">Rebuild Profile</button><p style="font-size:0.8rem;color:var(--text-muted);margin-top:8px">If you already uploaded a doc, click rebuild to re-parse it.</p></div>`;
           return;
         }
         const p = data.profile.structured_data;
         let html = '';
-        
+
         if (p.summary) {
-          html += `<div class="card"><p style="font-size:1.05rem">${p.summary}</p></div>`;
+          html += `<div class="card"><p style="font-size:1.05rem;line-height:1.7">${p.summary}</p></div>`;
         }
 
-        // Skills — supports new taxonomy format and legacy flat arrays
+        // Skills
         html += '<div class="card"><h3>Skills';
-        if (p.skills?.skill_count || p.skill_count) html += ` · ${p.skills?.skill_count || p.skill_count} identified`;
+        if (p.skills?.skill_count || p.skill_count) html += ` &middot; ${p.skills?.skill_count || p.skill_count} identified`;
         html += '</h3>';
         const skillCats = [
           { key: 'technical_domain', label: 'Technical & Domain', cls: 'tag' },
@@ -704,9 +752,9 @@
 
         // Experience
         if (p.job_history?.length) {
-          html += '<div class="card"><h3>Experience' + (p.years_of_experience ? ` · ${p.years_of_experience} years` : '') + '</h3>';
+          html += '<div class="card"><h3>Experience' + (p.years_of_experience ? ` &middot; ${p.years_of_experience} years` : '') + '</h3>';
           for (const j of p.job_history) {
-            html += `<div class="job-history-item"><div class="title">${j.title}</div><div class="meta">${j.company}${j.duration ? ' · ' + j.duration : ''}${j.industry ? ' · ' + j.industry : ''}</div></div>`;
+            html += `<div class="job-history-item"><div class="title">${j.title}</div><div class="meta">${j.company}${j.duration ? ' &middot; ' + j.duration : ''}${j.industry ? ' &middot; ' + j.industry : ''}</div></div>`;
           }
           html += '</div>';
         }
@@ -720,7 +768,7 @@
             const schoolDisplay = school && school !== 'Unknown' ? school : '';
             const yearDisplay = year && year !== 'Unknown' ? year : '';
             const metaParts = [schoolDisplay, yearDisplay].filter(Boolean);
-            html += `<div class="job-history-item"><div class="title">${e.degree}</div>${metaParts.length ? '<div class="meta">' + metaParts.join(' · ') + '</div>' : ''}</div>`;
+            html += `<div class="job-history-item"><div class="title">${e.degree}</div>${metaParts.length ? '<div class="meta">' + metaParts.join(' &middot; ') + '</div>' : ''}</div>`;
           }
           html += '</div>';
         }
@@ -735,7 +783,7 @@
           html += '<div class="card"><h3>Industries</h3><div class="tags">' + p.industries.map(i => `<span class="tag soft">${i}</span>`).join('') + '</div></div>';
         }
 
-        html += `<button class="btn btn-secondary" style="max-width:220px;margin-top:12px" onclick="rebuildProfile()">🔄 Rebuild Profile</button>`;
+        html += `<button class="btn btn-secondary" style="max-width:220px;margin-top:12px" onclick="rebuildProfile()">Rebuild Profile</button>`;
         el.innerHTML = html;
       } catch (ex) {
         el.innerHTML = `<div class="empty-state"><p>Failed to load profile. Please try again.</p></div>`;
@@ -744,7 +792,7 @@
 
     async function rebuildProfile() {
       const el = document.getElementById('profileContent');
-      el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Rebuilding profile with AI... this may take a moment.</div>';
+      el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Rebuilding profile with AI...</div>';
       try {
         await fetch(`${API}/profile/rebuild`, { method: 'POST', headers: authHeaders() });
         toast('Profile rebuilt!');
@@ -766,8 +814,8 @@
           el.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:16px">No documents uploaded yet.</p>';
           return;
         }
-        el.innerHTML = '<ul class="doc-list">' + data.documents.map(d => 
-          `<li class="doc-item"><span class="name">📄 ${d.filename}</span><span class="date">${new Date(d.uploaded_at).toLocaleDateString()}</span><button class="btn-delete" onclick="deleteDoc('${d.id}','${d.filename}')" title="Delete">🗑️</button></li>`
+        el.innerHTML = '<ul class="doc-list">' + data.documents.map(d =>
+          `<li class="doc-item"><span class="name">${d.filename}</span><span class="date">${new Date(d.uploaded_at).toLocaleDateString()}</span><button class="btn-delete" onclick="deleteDoc('${d.id}','${d.filename}')" title="Delete">&times;</button></li>`
         ).join('') + '</ul>';
       } catch (ex) {
         el.innerHTML = '<p style="color:var(--red)">Failed to load documents.</p>';
@@ -804,13 +852,12 @@
       const fd = new FormData();
       fd.append('file', file);
       try {
-        // Show stepped progress messages
         const stepMsg = (msg) => {
           const statusEl = dropZoneEl.querySelector('.upload-status');
           if (statusEl) statusEl.textContent = msg;
         };
         const analyzeTimer = setTimeout(() => {
-          dropZoneEl.innerHTML = '<div class="spinner" style="margin:0 auto 12px"></div><p class="upload-status" style="color:var(--text-muted);font-weight:500">Reading document...</p><p style="font-size:.8rem;color:var(--text-muted);margin-top:4px">Building your career profile</p><div style="margin:16px auto;width:80%;height:4px;background:var(--border);border-radius:4px;overflow:hidden"><div style="height:100%;width:0%;background:var(--accent);border-radius:4px;animation:progressBar 45s ease-out forwards"></div></div>';
+          dropZoneEl.innerHTML = '<div class="spinner" style="margin:0 auto 12px"></div><p class="upload-status" style="color:var(--text-muted);font-weight:500">Reading document...</p><p style="font-size:.8rem;color:var(--text-muted);margin-top:4px">Building your career profile</p><div style="margin:16px auto;width:80%;height:4px;background:var(--border);border-radius:4px;overflow:hidden"><div style="height:100%;width:0%;background:var(--navy);border-radius:4px;animation:progressBar 45s ease-out forwards"></div></div>';
         }, 1500);
         const step2 = setTimeout(() => stepMsg('Extracting work history...'), 6000);
         const step3 = setTimeout(() => stepMsg('Identifying skills & expertise...'), 12000);
@@ -826,7 +873,7 @@
         [analyzeTimer,step2,step3,step4,step5,step6,step7].forEach(clearTimeout);
         const data = await res.json();
         if (!data.ok) throw new Error(data.error);
-        dropZoneEl.innerHTML = '<div style="font-size:2rem;margin-bottom:8px">✅</div><p style="color:var(--green);font-weight:600">Profile updated!</p>';
+        dropZoneEl.innerHTML = '<p style="color:var(--green);font-weight:600;padding:20px 0">Profile updated</p>';
         setTimeout(() => { dropZoneEl.innerHTML = origHtml; dropZoneEl.style.pointerEvents = ''; }, 3000);
         toast('Document uploaded & profile updated!');
         loadDocuments();
@@ -846,7 +893,7 @@
         const res = await fetch(`${API}/matches`, { headers: authHeaders() });
         const data = await res.json();
         if (!data.ok || !data.matches?.length) {
-          el.innerHTML = '<div class="empty-state"><div class="icon">🎯</div><h3>No matches yet</h3><p>Upload your resume and we\'ll match you with jobs. Make sure jobs are seeded.</p></div>';
+          el.innerHTML = '<div class="empty-state"><h3>No matches yet</h3><p>Upload your resume and we\'ll match you with jobs.</p></div>';
           return;
         }
         el.innerHTML = data.matches.map((m, i) => {
@@ -870,25 +917,25 @@
                   <div class="location">${m.job.location}</div>
                   ${m.job.salary_min ? `<div class="salary">${formatSalary(m.job.salary_min)} – ${formatSalary(m.job.salary_max)}</div>` : ''}
                 </div>
-                ${hasScore 
+                ${hasScore
                   ? `<div class="score-badge ${scoreClass(displayScore)}" id="badge-${m.job.id}" title="Skills-first fit: ${displayScore}%">${scoreLabel}</div>`
-                  : `<div class="score-badge" id="badge-${m.job.id}" style="background:var(--surface2);color:var(--text-muted);font-size:.7rem;cursor:pointer" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')" title="Click to analyze">Analyze</div>`
+                  : `<div class="score-badge" id="badge-${m.job.id}" style="background:var(--surface2);color:var(--text-muted);font-size:.7rem;cursor:pointer;border:1px solid var(--border)" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')" title="Click to analyze">Analyze</div>`
                 }
               </div>
               ${whyJob ? `<div style="font-size:.8rem;color:var(--text-muted);margin-top:6px;font-style:italic">${whyJob}</div>` : ''}
-              ${matchedSkills.length ? `<div class="tags" style="margin-top:8px"><span style="font-size:.7rem;color:var(--green);margin-right:4px">✓</span>${matchedSkills.slice(0,6).map(s=>`<span class="tag" style="font-size:.75rem">${s}</span>`).join('')}</div>` : ''}
-              ${missingDetail.length ? `<div class="tags" style="margin-top:4px"><span style="font-size:.7rem;color:var(--yellow);margin-right:4px">✗</span>${missingDetail.slice(0,4).map(g=>{
+              ${matchedSkills.length ? `<div class="tags" style="margin-top:8px">${matchedSkills.slice(0,6).map(s=>`<span class="tag matched">${s}</span>`).join('')}</div>` : ''}
+              ${missingDetail.length ? `<div class="tags" style="margin-top:4px">${missingDetail.slice(0,4).map(g=>{
                 const sk = typeof g === 'string' ? g : g.skill || g.job_skill || g;
                 const closest = (typeof g === 'object' && g.closest_user_skill && g.similarity > 30) ? ` → ${g.closest_user_skill} ${g.similarity}%` : '';
-                return '<span class="tag" style="font-size:.75rem;opacity:.6">'+sk+closest+'</span>';
-              }).join('')}</div>` : (missingSimple.length ? `<div class="tags" style="margin-top:4px"><span style="font-size:.7rem;color:var(--yellow);margin-right:4px">✗</span>${missingSimple.slice(0,4).map(s=>`<span class="tag" style="font-size:.75rem;opacity:.5">${typeof s === 'string' ? s : s.skill || s}</span>`).join('')}</div>` : '')}
+                return '<span class="tag missing">'+sk+'<span style="font-size:.7rem;color:var(--text-muted);margin-left:4px">'+closest+'</span></span>';
+              }).join('')}</div>` : (missingSimple.length ? `<div class="tags" style="margin-top:4px">${missingSimple.slice(0,4).map(s=>`<span class="tag missing">${typeof s === 'string' ? s : s.skill || s}</span>`).join('')}</div>` : '')}
               <div class="match-detail" id="detail-${m.job.id}">
                 <div class="quick-view" style="display:none">
                   ${isDetailed ? `
                     <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.recommendation || b.summary || ''}</p>
                     ${breakdownBar('Skills', b.skills_match)}
-                    ${b.matched_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--green)">✓ Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div></div>' : ''}
-                    ${b.missing_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--yellow)">✗ Gaps:</span> ' + b.missing_skills.map(function(s){return '<span class="tag" style="font-size:.7rem;opacity:.5">'+s+'</span>'}).join(' ') + '</div></div>' : ''}
+                    ${b.matched_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--green)">Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag matched" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div></div>' : ''}
+                    ${b.missing_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--amber)">Gaps:</span> ' + b.missing_skills.map(function(s){return '<span class="tag missing" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div></div>' : ''}
                     ${breakdownBar('Experience', b.experience_match)}
                     ${b.experience_analysis ? `<div class="breakdown-detail"><span class="detail-stat" style="font-size:.8rem">${b.experience_analysis}</span></div>` : ''}
                     ${breakdownBar('Industry', b.industry_match || b.industry_bonus)}
@@ -904,19 +951,19 @@
                     <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">Click "Analyze Fit" to get an AI-powered fit score and detailed breakdown.</p>
                   `}
                   <details style="margin:8px 0 12px" onclick="event.stopPropagation();loadFullDescription(this,'${m.job.id}')">
-                    <summary style="cursor:pointer;font-size:.85rem;color:var(--accent)">📄 Full Job Description</summary>
+                    <summary style="cursor:pointer;font-size:.85rem;color:var(--navy)">Full Job Description</summary>
                     <div class="full-desc" style="font-size:.8rem;color:var(--text-muted);margin-top:8px;white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:12px;background:var(--surface2);border-radius:8px"><div class="spinner" style="margin:8px auto"></div></div>
                   </details>
                   <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
-                    ${m.job.url ? `<a href="${m.job.url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
-                    <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px" onclick="event.stopPropagation();saveJob('${m.job.id}')" id="save-btn-${m.job.id}">⭐ Save</button>
+                    ${m.job.url ? `<a href="${m.job.url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--navy);font-size:.85rem">View Job Posting &rarr;</a>` : ''}
+                    <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px;width:auto" onclick="event.stopPropagation();saveJob('${m.job.id}')" id="save-btn-${m.job.id}">Save</button>
                   </div>
                   ${hasDeepDive ? `
                     <details style="margin:8px 0 12px" onclick="event.stopPropagation()">
-                      <summary style="cursor:pointer;font-size:.85rem;color:var(--accent)">🔬 View Analysis</summary>
-                      <div style="font-size:.85rem;color:var(--text-muted);margin-top:8px;padding:12px;background:var(--surface2);border-radius:8px;line-height:1.5">${narrativeText || b.recommendation || b.summary || 'Analysis available.'}</div>
+                      <summary style="cursor:pointer;font-size:.85rem;color:var(--navy)">View Analysis</summary>
+                      <div style="font-size:.85rem;color:var(--text-muted);margin-top:8px;padding:12px;background:var(--surface2);border-radius:8px;line-height:1.6">${narrativeText || b.recommendation || b.summary || 'Analysis available.'}</div>
                     </details>
-                  ` : !isDetailed ? `<button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">🔬 AI Deep Dive</button>` : ''}
+                  ` : !isDetailed ? `<button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem;width:auto" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">AI Deep Dive</button>` : ''}
                   <div id="detailed-${m.job.id}"></div>
                 </div>
               </div>
@@ -957,8 +1004,8 @@
     async function runDetailedAnalysis(card, jobId) {
       const container = document.getElementById(`detailed-${jobId}`);
       const btn = card.querySelector(`#detail-${jobId} button`);
-      if (btn) { btn.disabled = true; btn.textContent = '⏳ Analyzing...'; }
-      
+      if (btn) { btn.disabled = true; btn.textContent = 'Analyzing...'; }
+
       try {
         const res = await fetch(`${API}/matches/${jobId}`, { headers: authHeaders() });
         const data = await res.json();
@@ -966,7 +1013,6 @@
         const b = data.match.breakdown;
         const job = data.job;
 
-        // Update headline score badge
         const badge = document.getElementById(`badge-${jobId}`);
         if (badge && data.match.score) {
           badge.textContent = data.match.score + '%';
@@ -976,37 +1022,33 @@
           badge.onclick = null;
         }
 
-        // Hide the analyze button
         if (btn) btn.style.display = 'none';
 
-        // Rebuild the quick-view with detailed results
         const quickView = card.querySelector(`#detail-${jobId} .quick-view`);
         if (quickView) {
-          // Clear old content except full-desc details and job link
           const details = quickView.querySelector('details');
           const link = quickView.querySelector('a[target="_blank"]');
           quickView.innerHTML = `
-            ${b.recommendation ? `<p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">💡 ${b.recommendation}</p>` : ''}
+            ${b.recommendation ? `<p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.recommendation}</p>` : ''}
             ${breakdownBar('Skills', b.skills_match)}
-            ${b.matched_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--green);font-size:.8rem;font-weight:600">✓ Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div>' : ''}
-            ${b.missing_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--yellow);font-size:.8rem;font-weight:600">✗ Gaps:</span> ' + b.missing_skills.map(function(s){return '<span class="tag" style="font-size:.7rem;opacity:.5">'+s+'</span>'}).join(' ') + '</div>' : ''}
+            ${b.matched_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--green);font-size:.8rem;font-weight:600">Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag matched" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div>' : ''}
+            ${b.missing_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--amber);font-size:.8rem;font-weight:600">Gaps:</span> ' + b.missing_skills.map(function(s){return '<span class="tag missing" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div>' : ''}
             ${breakdownBar('Experience', b.experience_match)}
             ${b.experience_analysis ? '<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">' + b.experience_analysis + '</p>' : ''}
             ${breakdownBar('Industry', b.industry_match)}
             ${b.industry_analysis ? '<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">' + b.industry_analysis + '</p>' : ''}
             ${breakdownBar('Education', b.education_match)}
-            ${b.strengths?.length ? '<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">✓ Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.strengths.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
-            ${b.gaps?.length ? '<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">⚠ Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.gaps.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
+            ${b.strengths?.length ? '<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.strengths.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
+            ${b.gaps?.length ? '<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--amber)">Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.gaps.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
           `;
-          // Re-add save button, full description details, and link
           const isSaved = savedJobIds.has(jobId);
-          quickView.insertAdjacentHTML('beforeend', `<div style="display:flex;gap:12px;align-items:center;margin:12px 0"><button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px" onclick="event.stopPropagation();saveJob('${jobId}')" id="save-btn-${jobId}">${isSaved ? '✅ Saved' : '⭐ Save'}</button>${link ? '' : ''}</div>`);
+          quickView.insertAdjacentHTML('beforeend', `<div style="display:flex;gap:12px;align-items:center;margin:12px 0"><button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px;width:auto" onclick="event.stopPropagation();saveJob('${jobId}')" id="save-btn-${jobId}">${isSaved ? 'Saved' : 'Save'}</button></div>`);
           if (details) quickView.appendChild(details);
           if (link) quickView.appendChild(link);
         }
       } catch (ex) {
         container.innerHTML = `<p style="color:var(--red);font-size:.85rem">Analysis failed: ${ex.message}</p>`;
-        if (btn) { btn.disabled = false; btn.textContent = '🔍 Analyze Fit'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Analyze Fit'; }
       }
     }
 
@@ -1028,8 +1070,8 @@
       const el = document.getElementById('matchFilterSummary');
       const cities = (settings.locations || []).join(', ') || 'None set';
       const salary = settings.salary_min ? '$' + (settings.salary_min/1000).toFixed(0) + 'k' + (settings.salary_max ? ' – $' + (settings.salary_max/1000).toFixed(0) + 'k' : '+') : 'Any';
-      const alerts = settings.alerts_enabled !== false ? '🔔 On (' + (settings.alert_threshold || 75) + '%+)' : '🔕 Off';
-      el.innerHTML = '📍 ' + cities + ' &nbsp;|&nbsp; 💰 ' + salary + ' &nbsp;|&nbsp; ' + alerts;
+      const alerts = settings.alerts_enabled !== false ? 'Alerts on (' + (settings.alert_threshold || 75) + '%+)' : 'Alerts off';
+      el.innerHTML = cities + ' &nbsp;&middot;&nbsp; ' + salary + ' &nbsp;&middot;&nbsp; ' + alerts;
     }
 
     async function loadMatchFilters() {
@@ -1052,7 +1094,7 @@
 
     function renderMatchLocationTags() {
       const el = document.getElementById('matchLocationTags');
-      el.innerHTML = matchFilterCities.map(c => '<span class="tag" style="cursor:pointer" onclick="removeMatchCity(this,\'' + c.replace(/'/g,"\\'") + '\')">' + c + ' ✕</span>').join('');
+      el.innerHTML = matchFilterCities.map(c => '<span class="tag" style="cursor:pointer" onclick="removeMatchCity(this,\'' + c.replace(/'/g,"\\'") + '\')">' + c + ' &times;</span>').join('');
     }
 
     function removeMatchCity(el, city) {
@@ -1102,17 +1144,16 @@
     async function triggerJobSync() {
       const btn = document.getElementById('findJobsBtn');
       btn.disabled = true;
-      btn.textContent = '⏳ Searching for jobs...';
+      btn.textContent = 'Searching for jobs...';
       try {
         const res = await fetch(`${API}/admin/sync-jobs?pin=7714`, { method: 'POST', headers: authHeaders() });
         const data = await res.json();
         toast('Found ' + (data.new_jobs || 0) + ' new jobs!');
-        // Recompute matches
         await fetch(`${API}/admin/recompute-matches?pin=7714`, { method: 'POST' });
         await loadMatches();
       } catch(e) { toast('Search failed: ' + e.message, 'error'); }
       btn.disabled = false;
-      btn.textContent = '🔍 Find New Jobs';
+      btn.textContent = 'Find New Jobs';
     }
 
     // ── Saved Jobs ──
@@ -1133,7 +1174,7 @@
         el.innerHTML = data.jobs.map(j => {
           const hasScore = j.score != null && j.breakdown?.detailed;
           return `
-            <div class="match-card">
+            <div class="match-card" style="cursor:default">
               <div class="match-header">
                 <div class="match-info">
                   <h3>${j.title}</h3>
@@ -1144,8 +1185,8 @@
                 ${hasScore ? `<div class="score-badge ${scoreClass(j.score)}">${j.score}%</div>` : ''}
               </div>
               <div style="display:flex;gap:12px;align-items:center;margin-top:12px">
-                ${j.url ? `<a href="${j.url}" target="_blank" style="color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
-                <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px;color:var(--red)" onclick="unsaveJob('${j.id}')">✕ Remove</button>
+                ${j.url ? `<a href="${j.url}" target="_blank" style="color:var(--navy);font-size:.85rem">View Job Posting &rarr;</a>` : ''}
+                <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px;color:var(--red);width:auto" onclick="unsaveJob('${j.id}')">Remove</button>
               </div>
             </div>`;
         }).join('');
@@ -1165,7 +1206,7 @@
         if (data.ok) {
           savedJobIds.add(jobId);
           const btn = document.getElementById(`save-btn-${jobId}`);
-          if (btn) { btn.textContent = '✓ Saved'; btn.disabled = true; btn.style.opacity = '.6'; }
+          if (btn) { btn.textContent = 'Saved'; btn.disabled = true; btn.style.opacity = '.6'; }
           toast('Job saved!');
         }
       } catch (ex) {
@@ -1202,15 +1243,13 @@
       } catch (ex) {}
     }
 
-    // Old settings location picker — removed (merged into matches)
     function renderLocationTags() {}
     function addLocation() {}
     function updateLocInputState() {}
     function removeLocation() {}
     function filterLocations() {}
 
-    // Settings merged into Matches tab
-    async function loadSettings() { /* no-op — merged into matches */ }
+    async function loadSettings() { }
     async function saveSettings(e) { if(e) e.preventDefault(); }
     async function saveAlertSettings() { }
 
@@ -1225,7 +1264,7 @@
         }
         el.innerHTML = data.alerts.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
           <div><strong>${a.job_title}</strong><br><span style="font-size:.8rem;color:var(--text-muted)">${a.company}</span></div>
-          <div style="text-align:right"><span style="background:var(--accent);color:#fff;padding:2px 8px;border-radius:8px;font-size:.8rem;font-weight:600">${a.score}%</span><br><span style="font-size:.75rem;color:var(--text-muted)">${new Date(a.sent_at).toLocaleDateString()}</span></div>
+          <div style="text-align:right"><span style="background:var(--navy);color:#fff;padding:2px 8px;border-radius:8px;font-size:.8rem;font-weight:600">${a.score}%</span><br><span style="font-size:.75rem;color:var(--text-muted)">${new Date(a.sent_at).toLocaleDateString()}</span></div>
         </div>`).join('');
       } catch (ex) {
         document.getElementById('alertHistory').innerHTML = '<p style="color:var(--text-muted)">Failed to load.</p>';
@@ -1241,8 +1280,7 @@
       updateObStep();
       initObDropZone();
       initObCityInput();
-      loadLocations(); // Pre-load city list for picker
-      // Pre-fill email
+      loadLocations();
       if (currentUser) document.getElementById('obAlertEmail').value = currentUser.email || '';
     }
 
@@ -1280,13 +1318,13 @@
       fd.append('file', file);
       try {
         const obStatus = document.querySelector('.ob-upload-status');
-        const obStep = (msg) => { if (obStatus) obStatus.textContent = msg; };
-        const os2 = setTimeout(() => obStep('Extracting work history...'), 5000);
-        const os3 = setTimeout(() => obStep('Identifying skills & expertise...'), 11000);
-        const os4 = setTimeout(() => obStep('Mapping education & certifications...'), 17000);
-        const os5 = setTimeout(() => obStep('Categorizing skill taxonomy...'), 23000);
-        const os6 = setTimeout(() => obStep('Building career profile...'), 31000);
-        const os7 = setTimeout(() => obStep('Almost there...'), 39000);
+        const obStepMsg = (msg) => { if (obStatus) obStatus.textContent = msg; };
+        const os2 = setTimeout(() => obStepMsg('Extracting work history...'), 5000);
+        const os3 = setTimeout(() => obStepMsg('Identifying skills & expertise...'), 11000);
+        const os4 = setTimeout(() => obStepMsg('Mapping education & certifications...'), 17000);
+        const os5 = setTimeout(() => obStepMsg('Categorizing skill taxonomy...'), 23000);
+        const os6 = setTimeout(() => obStepMsg('Building career profile...'), 31000);
+        const os7 = setTimeout(() => obStepMsg('Almost there...'), 39000);
         const res = await fetch(`${API}/documents/upload`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` },
@@ -1296,7 +1334,6 @@
         const data = await res.json();
         if (!data.ok) throw new Error(data.error);
 
-        // Wait a moment for profile rebuild then fetch it
         await new Promise(r => setTimeout(r, 2000));
         const pRes = await fetch(`${API}/profile`, { headers: authHeaders() });
         const pData = await pRes.json();
@@ -1306,10 +1343,10 @@
           obProfileData = pData.profile.structured_data;
           const skillCount = obProfileData.skills?.skill_count || obProfileData.skill_count || '?';
           const yoe = obProfileData.years_of_experience || '?';
-          summary.textContent = `✓ Found ${skillCount} skills across ${yoe} years of experience`;
+          summary.textContent = `Found ${skillCount} skills across ${yoe} years of experience`;
           summary.style.display = 'block';
         } else {
-          summary.textContent = '✓ Resume uploaded! Profile is building...';
+          summary.textContent = 'Resume uploaded. Profile is building...';
           summary.style.display = 'block';
         }
         obResumeUploaded = true;
@@ -1335,7 +1372,6 @@
       const input = document.getElementById('obCityInput');
       const dropdown = document.getElementById('obCityDropdown');
       const val = input.value.toLowerCase();
-      // Use allLocations from settings loader, or hardcoded metros
       const locs = allLocations.length ? allLocations : Object.keys({
         'Houston, TX':1,'Dallas, TX':1,'Austin, TX':1,'San Antonio, TX':1,'Denver, CO':1,
         'New York, NY':1,'Chicago, IL':1,'Los Angeles, CA':1,'San Francisco, CA':1,'Atlanta, GA':1,
@@ -1372,7 +1408,6 @@
 
     async function finishOnboarding() {
       try {
-        // Save settings
         const body = {
           locations: obCities,
           radius: 50,
@@ -1385,7 +1420,6 @@
         };
         await fetch(`${API}/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(body) });
 
-        // Hide onboarding, show app
         document.getElementById('onboarding').classList.remove('active');
         showApp();
         toast("You're all set! We'll email you when we find high-fit jobs.", 'success');
@@ -1399,7 +1433,6 @@
       const sel = document.getElementById('searchLocation');
       if (!sel || sel.options.length > 1) return;
       await loadLocations();
-      // Add user's saved cities first
       if (selectedLocations.length) {
         selectedLocations.forEach(l => { const o = document.createElement('option'); o.value = l.split(',')[0].trim(); o.textContent = l; sel.appendChild(o); });
         const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '───'; sel.appendChild(sep);
@@ -1425,12 +1458,12 @@
         if (!data.ok) throw new Error(data.error);
 
         if (!data.results.length) {
-          el.innerHTML = '<div class="empty-state"><div class="icon">😕</div><p>No results found. Try different keywords.</p></div>';
+          el.innerHTML = '<div class="empty-state"><p>No results found. Try different keywords.</p></div>';
           return;
         }
 
         if (!data.has_profile) {
-          el.innerHTML = '<div style="background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:.85rem;color:var(--yellow)">⚠️ Upload your resume first to see fit scores. <a style="color:var(--accent);cursor:pointer" onclick="switchTab(\'documents\')">Go to Documents →</a></div>' + renderSearchResults(data.results);
+          el.innerHTML = '<div style="background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:.85rem;color:var(--amber)">Upload your resume first to see fit scores. <a style="color:var(--navy);cursor:pointer" onclick="switchTab(\'documents\')">Go to Documents &rarr;</a></div>' + renderSearchResults(data.results);
         } else {
           el.innerHTML = renderSearchResults(data.results);
         }
@@ -1456,8 +1489,8 @@
             ${scoreHtml}
           </div>
           <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;align-items:center">
-            ${r.url ? `<a href="${r.url}" target="_blank" style="color:var(--accent);font-size:.85rem;text-decoration:none">View Job →</a>` : ''}
-            <button class="btn btn-secondary" style="width:auto;padding:8px 16px;font-size:.83rem" onclick="searchAnalyze(this, ${JSON.stringify(JSON.stringify({adzuna_id:r.adzuna_id,title:r.title,company:r.company,description:r.description,url:r.url}))})">🔍 Detailed Analysis</button>
+            ${r.url ? `<a href="${r.url}" target="_blank" style="color:var(--navy);font-size:.85rem;text-decoration:none">View Job &rarr;</a>` : ''}
+            <button class="btn btn-secondary" style="width:auto;padding:8px 16px;font-size:.83rem" onclick="searchAnalyze(this, ${JSON.stringify(JSON.stringify({adzuna_id:r.adzuna_id,title:r.title,company:r.company,description:r.description,url:r.url}))})">Detailed Analysis</button>
           </div>
           <div class="search-analysis-detail" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"></div>
         </div>`;
@@ -1469,7 +1502,7 @@
       const card = btn.closest('.match-card');
       const detail = card.querySelector('.search-analysis-detail');
       if (detail.style.display === 'block') { detail.style.display = 'none'; return; }
-      btn.disabled = true; btn.textContent = '⏳ Analyzing...';
+      btn.disabled = true; btn.textContent = 'Analyzing...';
       try {
         const res = await fetch(`${API}/jobs/search/analyze`, {
           method: 'POST', headers: authHeaders(),
@@ -1479,20 +1512,19 @@
         if (!data.ok) throw new Error(data.error);
         const b = data.breakdown;
 
-        // Update score badge
         const badge = card.querySelector('.score-badge');
         if (badge && data.score) {
-          badge.textContent = data.score + '% ✓';
+          badge.textContent = data.score + '%';
           badge.title = 'Detailed AI analysis';
           badge.className = 'score-badge ' + scoreClass(data.score);
         }
 
         detail.innerHTML = `
-          ${b.recommendation ? `<div style="background:var(--surface2);border-radius:10px;padding:12px 16px;margin-bottom:16px"><p style="font-size:.9rem;margin:0">💡 ${b.recommendation}</p></div>` : ''}
+          ${b.recommendation ? `<div style="background:var(--surface2);border-radius:8px;padding:12px 16px;margin-bottom:16px"><p style="font-size:.9rem;margin:0">${b.recommendation}</p></div>` : ''}
           ${breakdownBar('Skills', b.skills_match)}
           ${b.skills_analysis ? `<p class="analysis-text" style="padding-left:0"><strong>Skills:</strong> ${b.skills_analysis}</p>` : ''}
-          ${b.matched_skills?.length ? `<div style="margin-bottom:4px"><strong style="font-size:.8rem">Matched:</strong> ${b.matched_skills.map(s=>`<span class="tag" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
-          ${b.missing_skills?.length ? `<div style="margin-bottom:8px"><strong style="font-size:.8rem;color:var(--yellow)">Missing:</strong> ${b.missing_skills.map(s=>`<span class="tag" style="font-size:.7rem;opacity:.6">${s}</span>`).join(' ')}</div>` : ''}
+          ${b.matched_skills?.length ? `<div style="margin-bottom:4px"><strong style="font-size:.8rem">Matched:</strong> ${b.matched_skills.map(s=>`<span class="tag matched" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
+          ${b.missing_skills?.length ? `<div style="margin-bottom:8px"><strong style="font-size:.8rem;color:var(--amber)">Missing:</strong> ${b.missing_skills.map(s=>`<span class="tag missing" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
           ${breakdownBar('Experience', b.experience_match)}
           ${b.experience_analysis ? `<p class="analysis-text" style="padding-left:0">${b.experience_analysis}</p>` : ''}
           ${breakdownBar('Industry', b.industry_match)}
@@ -1501,25 +1533,23 @@
           ${b.education_analysis ? `<p class="analysis-text" style="padding-left:0">${b.education_analysis}</p>` : ''}
           ${b.leadership_match != null ? breakdownBar('Leadership', b.leadership_match) : ''}
           ${b.leadership_analysis ? `<p class="analysis-text" style="padding-left:0">${b.leadership_analysis}</p>` : ''}
-          ${b.strengths?.length ? `<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">✓ Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.strengths.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
-          ${b.gaps?.length ? `<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--yellow)">⚠ Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.gaps.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
-          <p style="font-size:.7rem;color:var(--text-muted);margin-top:12px;font-style:italic">✓ Detailed AI analysis</p>
+          ${b.strengths?.length ? `<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.strengths.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
+          ${b.gaps?.length ? `<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--amber)">Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">${b.gaps.map(s=>`<li>${s}</li>`).join('')}</ul></div>` : ''}
         `;
         detail.style.display = 'block';
-        btn.textContent = '🔍 Hide Analysis';
+        btn.textContent = 'Hide Analysis';
         btn.disabled = false;
         btn.onclick = function() {
-          if (detail.style.display === 'block') { detail.style.display = 'none'; btn.textContent = '🔍 Detailed Analysis'; }
-          else { detail.style.display = 'block'; btn.textContent = '🔍 Hide Analysis'; }
+          if (detail.style.display === 'block') { detail.style.display = 'none'; btn.textContent = 'Detailed Analysis'; }
+          else { detail.style.display = 'block'; btn.textContent = 'Hide Analysis'; }
         };
       } catch (ex) {
         detail.innerHTML = `<p style="color:var(--red);font-size:.85rem">Analysis failed: ${ex.message}</p>`;
         detail.style.display = 'block';
-        btn.disabled = false; btn.textContent = '🔍 Detailed Analysis';
+        btn.disabled = false; btn.textContent = 'Detailed Analysis';
       }
     }
 
-    // Init search location dropdown when switching to search tab
     const _origSwitchTab = switchTab;
     switchTab = function(tab) {
       _origSwitchTab(tab);
@@ -1545,14 +1575,13 @@
         }
       } catch (ex) {}
       if (msgs.length) {
-        banner.innerHTML = '⚠️ ' + msgs.join(' · ');
+        banner.innerHTML = msgs.join(' &middot; ');
         banner.style.display = 'block';
       } else {
         banner.style.display = 'none';
       }
     }
 
-    // Extend loadSettings to also load alert prefs
     const _origLoadSettings = loadSettings;
     loadSettings = async function() {
       await _origLoadSettings();

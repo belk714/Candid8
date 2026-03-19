@@ -349,8 +349,8 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
         if (!jobMatchesLocationFilter(job, locations, radius)) continue;
 
         // Salary filter (hard gate)
-        if (settings.salary_min && job.salary_max && job.salary_max < settings.salary_min) continue;
-        if (settings.salary_max && job.salary_min && job.salary_min > settings.salary_max) continue;
+        if (settings.salary_min && job.salary_max && typeof job.salary_max === "number" && job.salary_max > 0 && job.salary_max < settings.salary_min) continue;
+        if (settings.salary_max && settings.salary_max > 0 && job.salary_min && typeof job.salary_min === "number" && job.salary_min > 0 && job.salary_min > settings.salary_max) continue;
 
         // Seniority hard filter
         const skillEmbeddings = profile.skill_embeddings || {};
@@ -668,6 +668,39 @@ async function route(url, request, env, cors) {
   }
   if (path === '/api/admin/profile' && method === 'PATCH') return handleAdminPatchProfile(url, request, env, cors);
   if (path === '/api/admin/invite' && method === 'POST') return handleAdminInvite(url, request, env, cors);
+  if (path === '/api/admin/debug-filters' && method === 'GET') {
+    requirePin(url);
+    const userId = url.searchParams.get('user_id');
+    const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || '{}');
+    const profile = JSON.parse(await env.DATA.get(`profile:${userId}`) || 'null');
+    const jobsIndexJson = await env.DATA.get('jobs_index') || '[]';
+    const jobIds = JSON.parse(jobsIndexJson);
+    const locations = settings.locations || [];
+    const seniorityLevels = { 'entry': 1, 'mid': 2, 'senior': 3, 'director': 4, 'vp': 5, 'c-suite': 6 };
+    const userYoe = profile?.structured_data?.years_of_experience || 0;
+    const userSenLevel = userYoe >= 20 ? 5 : userYoe >= 15 ? 4 : userYoe >= 8 ? 3 : userYoe >= 3 ? 2 : 1;
+    let noEmb = 0, locFail = 0, salFail = 0, senFail = 0, pass = 0;
+    const locSamples = [];
+    for (const jid of jobIds.slice(0, 100)) {
+      const j = JSON.parse(await env.DATA.get(`job:${jid}`) || 'null');
+      if (!j || !j.embedding) { noEmb++; continue; }
+      if (locations.length > 0 && !jobMatchesLocationFilter(j, locations, settings.radius || 50)) { locFail++; if (locSamples.length < 5) locSamples.push(j.location); continue; }
+      if (settings.salary_min && j.salary_max && typeof j.salary_max === 'number' && j.salary_max > 0 && j.salary_max < settings.salary_min) { salFail++; continue; }
+      const sr = j.structured_requirements ? JSON.parse(j.structured_requirements) : null;
+      if (sr && sr.seniority_level) {
+        const jobSenLevel = seniorityLevels[sr.seniority_level] || 2;
+        if (Math.abs(userSenLevel - jobSenLevel) > 2) { senFail++; continue; }
+      }
+      pass++;
+    }
+    return Response.json({ ok: true, checked: Math.min(100, jobIds.length), no_embedding: noEmb, location_filtered: locFail, salary_filtered: salFail, seniority_filtered: senFail, passed: pass, user_locations: locations, user_sen_level: userSenLevel, sample_filtered_locations: locSamples }, { headers: cors });
+  }
+  if (path === '/api/admin/user-settings' && method === 'GET') {
+    requirePin(url);
+    const userId = url.searchParams.get('user_id');
+    const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || '{}');
+    return Response.json({ ok: true, settings }, { headers: cors });
+  }
   if (path === '/api/admin/regen-queries' && method === 'POST') {
     requirePin(url);
     const userId = url.searchParams.get('user_id');
@@ -1389,8 +1422,8 @@ async function handleGetMatches(request, env, cors) {
     if (!job) continue;
 
     // Apply salary filter
-    if (settings.salary_min && job.salary_max && job.salary_max < settings.salary_min) continue;
-    if (settings.salary_max && job.salary_min && job.salary_min > settings.salary_max) continue;
+    if (settings.salary_min && job.salary_max && typeof job.salary_max === "number" && job.salary_max > 0 && job.salary_max < settings.salary_min) continue;
+    if (settings.salary_max && settings.salary_max > 0 && job.salary_min && typeof job.salary_min === "number" && job.salary_min > 0 && job.salary_min > settings.salary_max) continue;
 
     // Apply location filter with radius
     if (settings.locations && settings.locations.length > 0) {
@@ -1558,9 +1591,9 @@ async function computeMatches(userId, env, profile) {
     // Hard filter: Location
     if (locations.length > 0 && !jobMatchesLocationFilter(job, locations, radius)) continue;
 
-    // Hard filter: Salary
-    if (settings.salary_min && job.salary_max && job.salary_max < settings.salary_min) continue;
-    if (settings.salary_max && job.salary_min && job.salary_min > settings.salary_max) continue;
+    // Hard filter: Salary (only filter if BOTH sides have real numbers)
+    if (settings.salary_min && job.salary_max && typeof job.salary_max === 'number' && job.salary_max > 0 && job.salary_max < settings.salary_min) continue;
+    if (settings.salary_max && settings.salary_max > 0 && job.salary_min && typeof job.salary_min === 'number' && job.salary_min > 0 && job.salary_min > settings.salary_max) continue;
 
     // Parse structured requirements
     let sr = null;
@@ -3139,9 +3172,10 @@ async function handleReembedAll(url, env, cors) {
   let parsed = 0;
   let failed = 0;
 
+  let missing = 0;
   for (const jobId of jobIds) {
     const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
-    if (!job) continue;
+    if (!job) { missing++; continue; }
 
     try {
       let sr = null;
@@ -3183,6 +3217,7 @@ async function handleReembedAll(url, env, cors) {
     next_offset: offset + limit < allJobIds.length ? offset + limit : null,
     reembedded,
     newly_parsed: parsed,
-    failed
+    failed,
+    missing
   }, { headers: cors });
 }
