@@ -1148,8 +1148,16 @@
       try {
         const res = await fetch(`${API}/admin/sync-jobs?pin=7714`, { method: 'POST', headers: authHeaders() });
         const data = await res.json();
-        toast('Found ' + (data.new_jobs || 0) + ' new jobs!');
-        await fetch(`${API}/admin/recompute-matches?pin=7714`, { method: 'POST' });
+        toast('Found ' + (data.new_jobs || 0) + ' new jobs! Computing matches...');
+        // Batch recompute synchronously so matches are ready before we load them
+        const userId = currentUser?.id;
+        let offset = 0;
+        while (true) {
+          const rc = await fetch(`${API}/admin/recompute-matches?pin=7714&sync=true&userId=${userId}&offset=${offset}&limit=30`, { method: 'POST' });
+          const rd = await rc.json();
+          if (!rd.next_offset) break;
+          offset = rd.next_offset;
+        }
         await loadMatches();
       } catch(e) { toast('Search failed: ' + e.message, 'error'); }
       btn.disabled = false;
