@@ -1149,9 +1149,28 @@
         const res = await fetch(`${API}/admin/sync-jobs?pin=7714`, { method: 'POST', headers: authHeaders() });
         const data = await res.json();
         toast('Found ' + (data.new_jobs || 0) + ' new jobs! Computing matches...');
-        // Batch recompute synchronously so matches are ready before we load them
+        btn.textContent = 'Computing matches...';
+        // Batch recompute synchronously
         const userId = currentUser?.id;
         let offset = 0;
+        while (true) {
+          const rc = await fetch(`${API}/admin/recompute-matches?pin=7714&sync=true&userId=${userId}&offset=${offset}&limit=30`, { method: 'POST' });
+          const rd = await rc.json();
+          if (!rd.next_offset) break;
+          offset = rd.next_offset;
+        }
+        // Scrape full JDs for matches (batches of 3) and re-parse skills
+        btn.textContent = 'Enriching top matches...';
+        offset = 0;
+        while (true) {
+          const sc = await fetch(`${API}/admin/scrape-jobs?pin=7714&userId=${userId}&minScore=0&offset=${offset}&limit=3`, { method: 'POST' });
+          const sd = await sc.json();
+          if (!sd.next_offset) break;
+          offset = sd.next_offset;
+        }
+        // Recompute matches after enrichment for updated scores
+        btn.textContent = 'Finalizing scores...';
+        offset = 0;
         while (true) {
           const rc = await fetch(`${API}/admin/recompute-matches?pin=7714&sync=true&userId=${userId}&offset=${offset}&limit=30`, { method: 'POST' });
           const rd = await rc.json();
