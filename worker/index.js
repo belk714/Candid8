@@ -371,11 +371,11 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
         if (settings.salary_min && job.salary_max && job.salary_max < settings.salary_min) continue;
         if (settings.salary_max && job.salary_min && job.salary_min > settings.salary_max) continue;
 
-        // Cosine similarity
+        // Cosine similarity — pre-filter at 35%
         const jobEmb = JSON.parse(job.embedding);
         const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
         const cosinePct = Math.round(cosineScore * 100);
-        if (cosinePct < 50) continue;
+        if (cosinePct < 35) continue;
 
         // Lazy parse structured requirements if missing
         if (!job.structured_requirements) {
@@ -391,20 +391,19 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
           } catch (e) { /* continue without structured */ }
         }
 
-        // Detailed GPT analysis for scoring
-        let breakdown = { pending: true, cosine_score: cosinePct };
-        let score = null;
+        // Skills-first composite scoring (no GPT call needed)
+        let sr = null;
         try {
-          const analysis = await generateDetailedBreakdown(env, profile.structured_data, job);
-          breakdown = { ...analysis, detailed: true, cosine_score: cosinePct };
-          const weights = { skills_match: 0.40, experience_match: 0.25, industry_match: 0.20, education_match: 0.10, certification_match: 0.05 };
-          let weightedScore = 0, totalWeight = 0;
-          for (const [key, weight] of Object.entries(weights)) {
-            if (breakdown[key] != null) { weightedScore += breakdown[key] * weight; totalWeight += weight; }
-          }
-          if (totalWeight > 0) score = Math.round(weightedScore / totalWeight);
-        } catch (e) {
-          console.error('Detailed analysis failed for alert:', job.title, e.message);
+          sr = job.structured_requirements ? (typeof job.structured_requirements === 'string' ? JSON.parse(job.structured_requirements) : job.structured_requirements) : null;
+        } catch (e) { sr = null; }
+
+        let breakdown, score;
+        if (sr) {
+          breakdown = generateBreakdown(profile.structured_data, job, cosinePct);
+          score = breakdown.overall;
+        } else {
+          breakdown = generateBreakdownLegacy(profile.structured_data, job, cosinePct);
+          score = cosinePct;
         }
         
         // Store match
@@ -414,6 +413,14 @@ async function matchNewJobsAgainstUsers(env, newJobIds) {
           user_id: userId,
           job_id: jobId,
           score,
+          composite_score: score,
+          cosine_pct: cosinePct,
+          skills_overlap_pct: breakdown.skills_match || 0,
+          matched_skills: breakdown.matched_skills || [],
+          missing_skills: breakdown.skills_detail?.required_skills_missing || [],
+          experience_fit: breakdown.experience_match || 0,
+          industry_bonus: breakdown.industry_match || 0,
+          education_fit: breakdown.education_match || 0,
           breakdown: JSON.stringify(breakdown),
           created_at: new Date().toISOString()
         };
@@ -1217,19 +1224,27 @@ async function handleGetMatches(request, env, cors) {
       if (!jobMatchesLocationFilter(job, settings.locations, settings.radius || 50)) continue;
     }
 
+    const breakdown = JSON.parse(m.breakdown || '{}');
     matches.push({
       id: m.id,
       score: m.score,
+      composite_score: m.composite_score ?? m.score,
       cosine_pct: m.cosine_pct || 0,
-      breakdown: JSON.parse(m.breakdown || '{}'),
+      skills_overlap_pct: m.skills_overlap_pct || breakdown.skills_match || 0,
+      matched_skills: m.matched_skills || breakdown.matched_skills || [],
+      missing_skills: m.missing_skills || breakdown.skills_detail?.required_skills_missing || [],
+      experience_fit: m.experience_fit || breakdown.experience_match || 0,
+      industry_bonus: m.industry_bonus || breakdown.industry_match || 0,
+      education_fit: m.education_fit || breakdown.education_match || 0,
+      breakdown,
       job: { id: job.id, title: job.title, company: job.company, location: job.location, salary_min: job.salary_min, salary_max: job.salary_max, url: job.url }
     });
   }
   
-  // Sort by GPT score first (if analyzed), then by cosine similarity
+  // Sort by composite score (skills-first), then cosine as tiebreaker
   matches.sort((a, b) => {
-    const aScore = a.score ?? -1;
-    const bScore = b.score ?? -1;
+    const aScore = a.composite_score ?? a.score ?? -1;
+    const bScore = b.composite_score ?? b.score ?? -1;
     if (aScore !== bScore) return bScore - aScore;
     return (b.cosine_pct || 0) - (a.cosine_pct || 0);
   });
@@ -1304,21 +1319,43 @@ async function computeMatches(userId, env, profile) {
     if (settings.salary_min && job.salary_max && job.salary_max < settings.salary_min) continue;
     if (settings.salary_max && job.salary_min && job.salary_min > settings.salary_max) continue;
 
-    // 2. Cosine similarity — skip if below 0.45 threshold
+    // 2. Cosine similarity — pre-filter at 35% threshold
     const jobEmb = JSON.parse(job.embedding);
     const cosineScore = cosineSimilarity(profile.embedding, jobEmb);
     const cosinePct = Math.round(cosineScore * 100);
-    if (cosinePct < 50) continue;
+    if (cosinePct < 35) continue;
 
-    // 3. Store as a candidate match (no score yet — user clicks "Analyze Fit" or alert engine scores it)
+    // 3. Skills-first composite scoring
+    let sr = null;
+    try {
+      sr = job.structured_requirements ? (typeof job.structured_requirements === 'string' ? JSON.parse(job.structured_requirements) : job.structured_requirements) : null;
+    } catch (e) { sr = null; }
+
+    let breakdown, compositeScore;
+    if (sr) {
+      breakdown = generateBreakdown(profile.structured_data, job, cosinePct);
+      compositeScore = breakdown.overall;
+    } else {
+      // Fallback: cosine + title matching for jobs without structured requirements
+      breakdown = generateBreakdownLegacy(profile.structured_data, job, cosinePct);
+      compositeScore = cosinePct; // cosine is the score for unstructured jobs
+    }
+
     const matchId = uuid();
     const match = {
       id: matchId,
       user_id: userId,
       job_id: jobId,
-      score: null,
+      score: compositeScore,
+      composite_score: compositeScore,
       cosine_pct: cosinePct,
-      breakdown: JSON.stringify({ pending: true, cosine_score: cosinePct }),
+      skills_overlap_pct: breakdown.skills_match || 0,
+      matched_skills: breakdown.matched_skills || [],
+      missing_skills: breakdown.skills_detail?.required_skills_missing || [],
+      experience_fit: breakdown.experience_match || 0,
+      industry_bonus: breakdown.industry_match || 0,
+      education_fit: breakdown.education_match || 0,
+      breakdown: JSON.stringify(breakdown),
       created_at: new Date().toISOString()
     };
     await env.DATA.put(`match:${matchId}`, JSON.stringify(match));
@@ -1398,8 +1435,17 @@ function generateBreakdown(profile, job, cosinePct) {
   
   const reqSkillScore = reqSkills.length > 0 ? (reqMatched.length / reqSkills.length) * 100 : 30; // No skills listed = low confidence
   const prefSkillScore = prefSkills.length > 0 ? (prefMatched.length / prefSkills.length) * 100 : 30;
-  // Required skills weight 80%, preferred 20%
-  const skillsScore = Math.round(reqSkillScore * 0.8 + prefSkillScore * 0.2);
+  // Required skills weight 70%, preferred 30% — weight by skill depth if available
+  const depthMultiplier = { expert: 1.2, advanced: 1.1, proficient: 1.05, intermediate: 1.0, basic: 0.9, familiar: 0.85 };
+  let depthBonus = 0;
+  if (isNewFormat && reqMatched.length > 0) {
+    for (const rs of reqMatched) {
+      const obj = allUserSkillObjects.find(us => skillsOverlap(us.skill, rs));
+      if (obj && obj.depth) depthBonus += (depthMultiplier[obj.depth] || 1.0) - 1.0;
+    }
+    depthBonus = depthBonus / reqSkills.length; // normalize
+  }
+  const skillsScore = Math.min(100, Math.round((reqSkillScore * 0.7 + prefSkillScore * 0.3) * (1 + depthBonus)));
 
   // 2. Experience fit
   const jobMinYoe = sr.min_years_experience || 0;
@@ -1450,11 +1496,12 @@ function generateBreakdown(profile, job, cosinePct) {
   const certsMatched = jobCerts.filter(jc => userCerts.some(uc => uc.includes(jc) || jc.includes(uc)));
   const certScore = jobCerts.length > 0 ? (certsMatched.length > 0 ? 85 : 40) : 50; // No certs listed = neutral
 
-  // Weighted composite: 70% structured, 30% cosine
+  // Weighted composite: skills-first (50% skills, 20% experience, 15% industry, 15% education/certs)
+  // Cosine used only as tiebreaker (tiny weight)
   const structuredScore = Math.round(
-    skillsScore * 0.35 + expScore * 0.20 + seniorityScore * 0.10 + industryScore * 0.15 + eduScore * 0.10 + certScore * 0.10
+    skillsScore * 0.50 + expScore * 0.12 + seniorityScore * 0.08 + industryScore * 0.15 + eduScore * 0.08 + certScore * 0.07
   );
-  const overall = Math.round(structuredScore * 0.70 + cosinePct * 0.30);
+  const overall = Math.round(structuredScore * 0.95 + cosinePct * 0.05);
 
   return {
     overall,
