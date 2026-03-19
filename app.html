@@ -852,10 +852,13 @@
         el.innerHTML = data.matches.map((m, i) => {
           const b = m.breakdown || {};
           const isDetailed = b.detailed;
-          const hasComposite = m.composite_score != null || m.score != null;
           const displayScore = m.composite_score ?? m.score;
-          const hasScore = hasComposite;
+          const hasScore = displayScore != null;
           const scoreLabel = hasScore ? `${displayScore}%` : '';
+          const matchedSkills = m.matched_skills || b.matched_skills || [];
+          const missingDetail = m.missing_skills_detail || b.missing_skills_detail || [];
+          const missingSimple = m.missing_skills || b.missing_skills || b.skills_detail?.required_skills_missing || [];
+          const whyJob = m.why_this_job || b.why_this_job || '';
           return `
             <div class="match-card" onclick="if(!event.target.closest('details,a,button,.tag'))toggleMatchQuick(this,'${m.job.id}')">
               <div class="match-header">
@@ -866,13 +869,17 @@
                   ${m.job.salary_min ? `<div class="salary">${formatSalary(m.job.salary_min)} – ${formatSalary(m.job.salary_max)}</div>` : ''}
                 </div>
                 ${hasScore 
-                  ? `<div class="score-badge ${scoreClass(displayScore)}" id="badge-${m.job.id}" title="Skills-first fit: ${displayScore}% (cosine: ${m.cosine_pct || '?'}%)">${scoreLabel}</div>`
-                  : `<div class="score-badge" id="badge-${m.job.id}" style="background:var(--surface2);color:var(--text-muted);font-size:.7rem;cursor:pointer" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')" title="Cosine: ${m.cosine_pct || '?'}% — click to analyze">Analyze</div>`
+                  ? `<div class="score-badge ${scoreClass(displayScore)}" id="badge-${m.job.id}" title="Skills-first fit: ${displayScore}%">${scoreLabel}</div>`
+                  : `<div class="score-badge" id="badge-${m.job.id}" style="background:var(--surface2);color:var(--text-muted);font-size:.7rem;cursor:pointer" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')" title="Click to analyze">Analyze</div>`
                 }
               </div>
-              ${(m.matched_skills?.length || b.matched_skills?.length) ? `<div class="tags" style="margin-top:8px"><span style="font-size:.7rem;color:var(--green);margin-right:4px">✓</span>${(m.matched_skills || b.matched_skills).slice(0,6).map(s=>`<span class="tag" style="font-size:.75rem">${s}</span>`).join('')}</div>` : ''}
-              ${(m.missing_skills?.length || b.skills_detail?.required_skills_missing?.length) ? `<div class="tags" style="margin-top:4px"><span style="font-size:.7rem;color:var(--yellow);margin-right:4px">✗</span>${(m.missing_skills || b.skills_detail?.required_skills_missing || []).slice(0,4).map(s=>`<span class="tag" style="font-size:.75rem;opacity:.5">${s}</span>`).join('')}</div>` : ''}
-              ${b.strengths?.length && !m.matched_skills?.length && !b.matched_skills?.length ? `<div class="tags" style="margin-top:8px">${b.strengths.map(s=>`<span class="tag" style="font-size:.75rem">${s}</span>`).join('')}</div>` : ''}
+              ${whyJob ? `<div style="font-size:.8rem;color:var(--text-muted);margin-top:6px;font-style:italic">${whyJob}</div>` : ''}
+              ${matchedSkills.length ? `<div class="tags" style="margin-top:8px"><span style="font-size:.7rem;color:var(--green);margin-right:4px">✓</span>${matchedSkills.slice(0,6).map(s=>`<span class="tag" style="font-size:.75rem">${s}</span>`).join('')}</div>` : ''}
+              ${missingDetail.length ? `<div class="tags" style="margin-top:4px"><span style="font-size:.7rem;color:var(--yellow);margin-right:4px">✗</span>${missingDetail.slice(0,4).map(g=>{
+                const sk = typeof g === 'string' ? g : g.skill || g.job_skill || g;
+                const closest = (typeof g === 'object' && g.closest_user_skill && g.similarity > 30) ? ` → ${g.closest_user_skill} ${g.similarity}%` : '';
+                return '<span class="tag" style="font-size:.75rem;opacity:.6">'+sk+closest+'</span>';
+              }).join('')}</div>` : (missingSimple.length ? `<div class="tags" style="margin-top:4px"><span style="font-size:.7rem;color:var(--yellow);margin-right:4px">✗</span>${missingSimple.slice(0,4).map(s=>`<span class="tag" style="font-size:.75rem;opacity:.5">${typeof s === 'string' ? s : s.skill || s}</span>`).join('')}</div>` : '')}
               <div class="match-detail" id="detail-${m.job.id}">
                 <div class="quick-view" style="display:none">
                   ${isDetailed ? `
@@ -882,15 +889,15 @@
                     ${b.missing_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--yellow)">✗ Gaps:</span> ' + b.missing_skills.map(function(s){return '<span class="tag" style="font-size:.7rem;opacity:.5">'+s+'</span>'}).join(' ') + '</div></div>' : ''}
                     ${breakdownBar('Experience', b.experience_match)}
                     ${b.experience_analysis ? `<div class="breakdown-detail"><span class="detail-stat" style="font-size:.8rem">${b.experience_analysis}</span></div>` : ''}
-                    ${breakdownBar('Industry', b.industry_match)}
+                    ${breakdownBar('Industry', b.industry_match || b.industry_bonus)}
                     ${b.industry_analysis ? `<div class="breakdown-detail"><span class="detail-stat" style="font-size:.8rem">${b.industry_analysis}</span></div>` : ''}
                     ${breakdownBar('Education', b.education_match)}
-                  ` : hasComposite ? `
+                  ` : hasScore ? `
                     <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.summary || displayScore + '% skills-first match'}</p>
                     ${breakdownBar('Skills', m.skills_overlap_pct || b.skills_match)}
-                    ${breakdownBar('Experience', m.experience_fit || b.experience_match)}
-                    ${breakdownBar('Industry', m.industry_bonus || b.industry_match)}
-                    ${breakdownBar('Education', m.education_fit || b.education_match)}
+                    ${breakdownBar('Experience', b.experience_match != null ? b.experience_match * 10 : (m.experience_fit || 50))}
+                    ${breakdownBar('Industry', b.industry_bonus != null ? b.industry_bonus * 20 : (m.industry_bonus || 50))}
+                    ${breakdownBar('Education', b.education_match != null ? b.education_match * 20 : (m.education_fit || 50))}
                   ` : `
                     <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">Click "Analyze Fit" to get an AI-powered fit score and detailed breakdown.</p>
                   `}
@@ -902,7 +909,7 @@
                     ${m.job.url ? `<a href="${m.job.url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent);font-size:.85rem">View Job Posting →</a>` : ''}
                     <button class="btn btn-secondary" style="font-size:.8rem;padding:6px 14px" onclick="event.stopPropagation();saveJob('${m.job.id}')" id="save-btn-${m.job.id}">⭐ Save</button>
                   </div>
-                  ${!isDetailed ? `<button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">${hasComposite ? '🔬 AI Deep Dive' : '🔍 Analyze Fit'}</button>` : ''}
+                  ${!isDetailed ? `<button class="btn btn-secondary" style="max-width:280px;margin:0 auto 12px;display:block;font-size:.85rem" onclick="event.stopPropagation();runDetailedAnalysis(this.closest('.match-card'),'${m.job.id}')">🔬 AI Deep Dive</button>` : ''}
                   <div id="detailed-${m.job.id}"></div>
                 </div>
               </div>
