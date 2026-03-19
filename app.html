@@ -890,7 +890,7 @@
     async function loadMatches() {
       const el = document.getElementById('matchesContent');
       try {
-        const res = await fetch(`${API}/matches`, { headers: authHeaders() });
+        const res = await fetch(`${API}/matches?_t=${Date.now()}`, { headers: authHeaders(), cache: 'no-store' });
         const data = await res.json();
         if (!data.ok || !data.matches?.length) {
           el.innerHTML = '<div class="empty-state"><h3>No matches yet</h3><p>Upload your resume and we\'ll match you with jobs.</p></div>';
