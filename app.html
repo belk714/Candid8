@@ -1163,7 +1163,7 @@
         btn.textContent = 'Enriching top matches...';
         offset = 0;
         while (true) {
-          const sc = await fetch(`${API}/admin/scrape-jobs?pin=7714&userId=${userId}&minScore=0&offset=${offset}&limit=3`, { method: 'POST' });
+          const sc = await fetch(`${API}/admin/scrape-jobs?pin=7714&userId=${userId}&minScore=0&offset=${offset}&limit=1`, { method: 'POST' });
           const sd = await sc.json();
           if (!sd.next_offset) break;
           offset = sd.next_offset;
