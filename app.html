@@ -923,12 +923,11 @@
                 }
               </div>
               ${whyJob ? `<div style="font-size:.8rem;color:var(--text-muted);margin-top:6px;font-style:italic">${whyJob}</div>` : ''}
-              ${matchedSkills.length ? `<div class="tags" style="margin-top:8px">${matchedSkills.map(s=>`<span class="tag matched">${s}</span>`).join('')}${matchedSkills.length > 8 ? `<span class="tag" style="opacity:0.7;font-style:italic">+${matchedSkills.length - 8} more</span>` : ''}</div>` : ''}
-              ${missingDetail.length ? `<div class="tags" style="margin-top:4px">${missingDetail.slice(0,6).map(g=>{
+              ${matchedSkills.length ? `<div style="margin-top:8px"><span style="font-size:.7rem;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:.05em">✓ Your matching skills</span><div class="tags" style="margin-top:4px">${matchedSkills.slice(0,8).map(s=>`<span class="tag matched">${s}</span>`).join('')}${matchedSkills.length > 8 ? `<span class="tag" style="opacity:0.7;font-style:italic">+${matchedSkills.length - 8} more</span>` : ''}</div></div>` : ''}
+              ${missingDetail.length || missingSimple.length ? `<div style="margin-top:6px"><span style="font-size:.7rem;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:.05em">✗ Skills you're missing</span><div class="tags" style="margin-top:4px">${(missingDetail.length ? missingDetail : missingSimple).slice(0,6).map(g=>{
                 const sk = typeof g === 'string' ? g : g.skill || g.job_skill || g;
-                const closest = (typeof g === 'object' && g.closest_user_skill && g.similarity > 30) ? ` → ${g.closest_user_skill} ${g.similarity}%` : '';
-                return '<span class="tag missing">'+sk+'<span style="font-size:.7rem;color:var(--text-muted);margin-left:4px">'+closest+'</span></span>';
-              }).join('')}${missingDetail.length > 6 ? `<span class="tag missing" style="opacity:0.7;font-style:italic">+${missingDetail.length - 6} more gaps</span>` : ''}</div>` : (missingSimple.length ? `<div class="tags" style="margin-top:4px">${missingSimple.slice(0,6).map(s=>`<span class="tag missing">${typeof s === 'string' ? s : s.skill || s}</span>`).join('')}${missingSimple.length > 6 ? `<span class="tag missing" style="opacity:0.7;font-style:italic">+${missingSimple.length - 6} more</span>` : ''}</div>` : '')}
+                return '<span class="tag missing">'+sk+'</span>';
+              }).join('')}${(missingDetail.length || missingSimple.length) > 6 ? `<span class="tag missing" style="opacity:0.7;font-style:italic">+${(missingDetail.length || missingSimple.length) - 6} more</span>` : ''}</div></div>` : ''}
               <div class="match-detail" id="detail-${m.job.id}">
                 <div class="quick-view" style="display:none">
                   ${isDetailed ? `

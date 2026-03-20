@@ -1539,6 +1539,11 @@ async function handleGetMatches(request, env, cors) {
     }
 
     const breakdown = JSON.parse(m.breakdown || '{}');
+    
+    // Display threshold: don't show matches below 30%
+    const displayScore = m.composite_score ?? m.score;
+    if (displayScore != null && displayScore < 30) continue;
+    
     matches.push({
       id: m.id,
       score: m.score,
@@ -1799,8 +1804,11 @@ function skillsOverlap(userSkill, jobSkill) {
   const bWords = b.split(' ').filter(w => w.length >= 3);
   if (aWords.length === 0 || bWords.length === 0) return false;
   const commonWords = aWords.filter(w => bWords.some(bw => wordsAreSynonyms(w, bw)));
-  // For 2-word skills, require at least 1 word match; for longer, require 50%
-  const minWords = aWords.length <= 2 && bWords.length <= 2 ? 1 : Math.ceil(Math.min(aWords.length, bWords.length) * 0.5);
+  // Require 60% word overlap minimum, and at least 1 word for short skills
+  const minWords = Math.max(1, Math.ceil(Math.min(aWords.length, bWords.length) * 0.6));
+  // For single-word skills, both words must match (exact or synonym)
+  if (aWords.length === 1 && bWords.length === 1) return commonWords.length >= 1;
+  // For multi-word, require proportional overlap
   return commonWords.length >= minWords;
 }
 
@@ -1883,18 +1891,74 @@ function generateAccurateBreakdown(profile, job, skillEmbeddings) {
     }
   }
 
-  // Skills score with explicit/inferred weighting
-  // Explicit skills = 1.0 credit, inferred skills = 0.5 credit (both numerator and denominator)
-  function sourceWeight(skillName) { return skillSourceMap[skillName] === 'inferred' ? 0.5 : 1.0; }
+  // Skills score with core_technical vs general weighting
+  // Core technical skills get 2.0 weight, general skills get 0.5 weight
+  // This means missing core technical skills devastates the score
   
-  const reqWeightedTotal = reqSkills.reduce((sum, s) => sum + sourceWeight(s), 0) || 1;
-  const prefWeightedTotal = prefSkills.reduce((sum, s) => sum + sourceWeight(s), 0) || 1;
-  const reqWeightedMatched = reqResult.full_matches.reduce((sum, m) => sum + sourceWeight(m.job_skill), 0)
-    + reqResult.partial_matches.reduce((sum, m) => sum + sourceWeight(m.job_skill) * 0.5, 0);
-  const prefWeightedMatched = prefResult.full_matches.reduce((sum, m) => sum + sourceWeight(m.job_skill), 0)
-    + prefResult.partial_matches.reduce((sum, m) => sum + sourceWeight(m.job_skill) * 0.5, 0);
+  // Heuristic: classify skills as core_technical or general when type not provided
+  const GENERAL_SKILL_PATTERNS = [
+    'communication', 'leadership', 'team management', 'teamwork', 'collaboration',
+    'problem solving', 'critical thinking', 'analytical thinking', 'decision making',
+    'time management', 'project management', 'program management', 'stakeholder management',
+    'strategic thinking', 'strategic planning', 'change management', 'organizational',
+    'presentation', 'negotiation', 'interpersonal', 'mentoring', 'coaching',
+    'relationship building', 'client relations', 'client management', 'customer service',
+    'cross-functional', 'multitasking', 'adaptability', 'flexibility', 'attention to detail',
+    'initiative', 'self-motivated', 'results-driven', 'goal-oriented', 'accountability',
+    'conflict resolution', 'influence', 'persuasion', 'emotional intelligence',
+    'written communication', 'verbal communication', 'public speaking',
+    'business acumen', 'business development', 'process improvement',
+    'team building', 'people management', 'performance management',
+  ];
+  
+  function inferSkillType(skillName) {
+    const lower = (skillName || '').toLowerCase();
+    // Check if it matches known general/soft skill patterns
+    for (const pattern of GENERAL_SKILL_PATTERNS) {
+      if (lower.includes(pattern) || pattern.includes(lower)) return 'general';
+    }
+    // Single-word generic skills
+    if (['leadership', 'communication', 'teamwork', 'collaboration', 'creativity', 'innovation', 'agile', 'scrum'].includes(lower)) return 'general';
+    // Default: if not clearly soft/general, treat as core_technical
+    return 'core_technical';
+  }
+  
+  const skillTypeMap = {};
+  for (const s of rawReqSkills) {
+    if (typeof s === 'object' && s.skill) {
+      skillTypeMap[s.skill] = s.type || inferSkillType(s.skill);
+    } else if (typeof s === 'string') {
+      skillTypeMap[s] = inferSkillType(s);
+    }
+  }
+  for (const s of rawPrefSkills) {
+    if (typeof s === 'object' && s.skill) {
+      skillTypeMap[s.skill] = s.type || inferSkillType(s.skill);
+    } else if (typeof s === 'string') {
+      skillTypeMap[s] = inferSkillType(s);
+    }
+  }
+  
+  function skillWeight(skillName) {
+    const type = skillTypeMap[skillName] || 'general';
+    const sourceW = skillSourceMap[skillName] === 'inferred' ? 0.5 : 1.0;
+    const typeW = type === 'core_technical' ? 3.0 : 0.3;
+    return sourceW * typeW;
+  }
+  
+  const reqWeightedTotal = reqSkills.reduce((sum, s) => sum + skillWeight(s), 0) || 1;
+  const prefWeightedTotal = prefSkills.reduce((sum, s) => sum + skillWeight(s), 0) || 1;
+  const reqWeightedMatched = reqResult.full_matches.reduce((sum, m) => sum + skillWeight(m.job_skill), 0)
+    + reqResult.partial_matches.reduce((sum, m) => sum + skillWeight(m.job_skill) * 0.5, 0);
+  const prefWeightedMatched = prefResult.full_matches.reduce((sum, m) => sum + skillWeight(m.job_skill), 0)
+    + prefResult.partial_matches.reduce((sum, m) => sum + skillWeight(m.job_skill) * 0.5, 0);
   const reqScore = (reqWeightedMatched / reqWeightedTotal) * 100;
   const prefScore = (prefWeightedMatched / prefWeightedTotal) * 100;
+  
+  // Track core technical gaps for display
+  const coreTechGaps = reqResult.gaps.filter(g => skillTypeMap[g.job_skill] === 'core_technical');
+  const coreTechTotal = reqSkills.filter(s => skillTypeMap[s] === 'core_technical').length;
+  const coreTechMatched = reqResult.full_matches.filter(m => skillTypeMap[m.job_skill] === 'core_technical').length;
   
   // Depth bonus for expert/advanced skills
   const depthMultiplier = { expert: 1.15, advanced: 1.1, proficient: 1.05, intermediate: 1.0, basic: 0.95, familiar: 0.9 };
@@ -2010,6 +2074,9 @@ function generateAccurateBreakdown(profile, job, skillEmbeddings) {
     matched_skills: matchedSkillNames, // Show ALL matched skills, not just 10
     missing_skills: reqResult.gaps.map(g => g.job_skill),
     missing_skills_detail: missingSkillsDetail,
+    core_tech_total: coreTechTotal,
+    core_tech_matched: coreTechMatched,
+    core_tech_gaps: coreTechGaps.map(g => g.job_skill),
     why_this_job: whyThisJob,
     summary: `${overall}% match for ${job.title} at ${job.company}. ${reqResult.full_matches.length}/${reqSkills.length} required skills matched.`
   };
@@ -2740,8 +2807,8 @@ async function parseStructuredRequirements(env, title, company, description) {
             role: 'system',
             content: `Extract ALL structured requirements from the job posting. Your goal is comprehensive skill extraction. Return valid JSON with this schema:
 {
-  "required_skills": [{"skill": "...", "source": "explicit|inferred"}],
-  "preferred_skills": [{"skill": "...", "source": "explicit|inferred"}],
+  "required_skills": [{"skill": "...", "source": "explicit|inferred", "type": "core_technical|general"}],
+  "preferred_skills": [{"skill": "...", "source": "explicit|inferred", "type": "core_technical|general"}],
   "min_years_experience": 0,
   "seniority_level": "entry|mid|senior|director|vp|c-suite",
   "industries": ["..."],
@@ -2756,6 +2823,11 @@ COMPREHENSIVE SKILL EXTRACTION RULES:
 2. **Categories to extract**: Technical tools, programming languages, frameworks, methodologies, certifications, domain expertise, soft skills, industry knowledge.
 3. **Look everywhere**: Requirements sections, responsibilities, qualifications, nice-to-haves, even in job descriptions.
 4. **Break down compound skills**: "Python/SQL" becomes ["Python", "SQL"]
+
+SKILL TYPE RULES (CRITICAL for accurate scoring):
+- "core_technical" = specific technical skills, tools, platforms, certifications, domain-specific knowledge that require dedicated training/experience. Examples: SAP PM, Python, AWS, Salesforce, ABAP, Six Sigma, AutoCAD, financial modeling. These are NON-NEGOTIABLE — a candidate either has them or doesn't.
+- "general" = transferable soft skills, generic business skills, management capabilities that any experienced professional might have. Examples: communication, project management, team leadership, stakeholder management, problem solving, strategic thinking.
+- When in doubt, ask: "Would a hiring manager reject a candidate specifically for lacking THIS skill?" If yes → core_technical. If it's just a nice-to-have personality trait → general.
 
 SKILL SOURCE RULES:
 - "explicit" = directly mentioned in text OR clearly required by listed responsibility
