@@ -153,8 +153,8 @@ async function runUnifiedJobPipeline(env, options = {}) {
     console.log(`Fetching jobs: ${cronFetchTasks.length} query/location combinations`);
     
     // Fetch jobs in parallel batches of 5
-    for (let i = 0; i < cronFetchTasks.length; i += 5) {
-      const batch = cronFetchTasks.slice(i, i + 5);
+    for (let i = 0; i < cronFetchTasks.length; i += 10) {
+      const batch = cronFetchTasks.slice(i, i + 10);
       const results = await Promise.allSettled(batch.map(async ({ query, loc }) => {
         const params = new URLSearchParams({
           app_id: ADZUNA_APP_ID, app_key: ADZUNA_APP_KEY,
@@ -688,6 +688,9 @@ async function route(url, request, env, cors) {
 
   // Admin: sync Adzuna jobs
   if (path === '/api/admin/sync-jobs' && method === 'POST') return handleSyncAdzunaJobs(request, env, cors);
+
+  // Admin: progressive enrichment endpoint
+  if (path === '/api/admin/enrich-job' && method === 'POST') return handleEnrichJob(url, env, cors);
 
   // Admin: re-embed all jobs with normalized format
   if (path === '/api/admin/reembed-all' && method === 'POST') return handleReembedAll(url, env, cors);
@@ -2854,11 +2857,8 @@ async function handleSyncAdzunaJobs(request, env, cors) {
   try {
     const existingIndexJson = await env.DATA.get('jobs_index') || '[]';
     let existingIds = JSON.parse(existingIndexJson);
-    const existingAdzunaIds = new Set();
-    for (const eid of existingIds) {
-      const existingJob = JSON.parse(await env.DATA.get(`job:${eid}`) || 'null');
-      if (existingJob && existingJob.adzuna_id) existingAdzunaIds.add(existingJob.adzuna_id);
-    }
+    const adzunaIdSetJson = await env.DATA.get('adzuna_ids_index') || '[]';
+    const existingAdzunaIds = new Set(JSON.parse(adzunaIdSetJson));
 
     const seenIds = new Set();
     const allJobs = [];
@@ -2882,13 +2882,10 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     for (const query of userQueryList) {
       for (const loc of locationList) cronFetchTasks.push({ query, loc });
     }
-    for (const category of BROAD_CATEGORIES) {
-      for (const loc of locationList) cronFetchTasks.push({ query: category, loc });
-    }
 
     // Fetch in parallel batches of 5
-    for (let i = 0; i < cronFetchTasks.length; i += 5) {
-      const batch = cronFetchTasks.slice(i, i + 5);
+    for (let i = 0; i < cronFetchTasks.length; i += 10) {
+      const batch = cronFetchTasks.slice(i, i + 10);
       const results = await Promise.allSettled(batch.map(async ({ query, loc }) => {
         const params = new URLSearchParams({
           app_id: ADZUNA_APP_ID, app_key: ADZUNA_APP_KEY,
@@ -2934,6 +2931,13 @@ async function handleSyncAdzunaJobs(request, env, cors) {
     if (newJobIds.length > 0) {
       existingIds = [...existingIds, ...newJobIds];
       await env.DATA.put('jobs_index', JSON.stringify(existingIds));
+    // Update adzuna IDs index for fast dedup
+    const newAdzunaIds = allJobs.filter(j => j.adzuna_id).map(j => j.adzuna_id);
+    if (newAdzunaIds.length > 0) {
+      const currentAdzunaIds = JSON.parse(await env.DATA.get('adzuna_ids_index') || '[]');
+      const mergedIds = [...new Set([...currentAdzunaIds, ...newAdzunaIds])];
+      await env.DATA.put('adzuna_ids_index', JSON.stringify(mergedIds));
+    }
     }
     await env.DATA.put('last_sync_time', new Date().toISOString());
     await env.DATA.put('last_sync_result', JSON.stringify({ new_jobs: newJobIds.length, queries_used: cronFetchTasks.length, total_index: existingIds.length }));
@@ -3155,6 +3159,119 @@ async function handleAdminInvite(url, request, env, cors) {
   } catch(e) { console.error('Invite email failed:', e.message); }
 
   return Response.json({ ok: true, user_id: id }, { headers: cors });
+}
+
+// ── Admin: Progressive Enrichment ────────────────────────────────────────────
+
+async function handleEnrichJob(url, env, cors) {
+  requirePin(url);
+  const jobId = url.searchParams.get('jobId');
+  if (!jobId) return Response.json({ ok: false, error: 'jobId required' }, { status: 400, headers: cors });
+
+  const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
+  if (!job) return Response.json({ ok: false, error: 'Job not found' }, { status: 404, headers: cors });
+
+  let updated = false;
+  let enrichmentSteps = [];
+
+  try {
+    // Step 1: Scrape full description if we don't have it
+    if (!job.full_description && job.url) {
+      try {
+        const fullDesc = await scrapeFullDescription(job.url);
+        if (fullDesc && fullDesc.length > (job.description || '').length) {
+          job.full_description = fullDesc;
+          updated = true;
+          enrichmentSteps.push(`Scraped ${fullDesc.length} chars`);
+        } else {
+          enrichmentSteps.push('Scrape yielded no new content');
+        }
+      } catch (e) {
+        enrichmentSteps.push(`Scrape failed: ${e.message}`);
+      }
+    } else if (job.full_description) {
+      enrichmentSteps.push('Full description already exists');
+    } else {
+      enrichmentSteps.push('No URL to scrape');
+    }
+
+    // Step 2: Parse structured requirements if we don't have them
+    const textForParsing = job.full_description || job.description || '';
+    if (!job.structured_requirements && textForParsing.length > 50) {
+      try {
+        const sr = await parseStructuredRequirements(env, job.title, job.company, textForParsing);
+        if (sr) {
+          job.structured_requirements = JSON.stringify(sr);
+          updated = true;
+          const skillCount = (sr.required_skills || []).length + (sr.preferred_skills || []).length;
+          enrichmentSteps.push(`Parsed ${skillCount} skills`);
+        } else {
+          enrichmentSteps.push('Parse failed');
+        }
+      } catch (e) {
+        enrichmentSteps.push(`Parse failed: ${e.message}`);
+      }
+    } else if (job.structured_requirements) {
+      const existing = JSON.parse(job.structured_requirements);
+      const skillCount = (existing.required_skills || []).length + (existing.preferred_skills || []).length;
+      enrichmentSteps.push(`Already has ${skillCount} skills`);
+    } else {
+      enrichmentSteps.push('Description too short to parse');
+    }
+
+    // Step 3: Generate embedding if we don't have it
+    if (!job.embedding && textForParsing.length > 50) {
+      try {
+        const sr = job.structured_requirements ? JSON.parse(job.structured_requirements) : null;
+        const embText = sr
+          ? buildNormalizedEmbeddingText('job', sr)
+          : `Job Title: ${job.title}. Job Title: ${job.title}. Company: ${job.company}. Location: ${job.location || ''}. Industry: ${job.category || ''}. ${textForParsing.substring(0, 400)}`;
+        const embedding = await getEmbedding(env, embText);
+        job.embedding = JSON.stringify(embedding);
+        updated = true;
+        enrichmentSteps.push('Generated embedding');
+      } catch (e) {
+        enrichmentSteps.push(`Embedding failed: ${e.message}`);
+      }
+    } else if (job.embedding) {
+      enrichmentSteps.push('Embedding already exists');
+    } else {
+      enrichmentSteps.push('No content for embedding');
+    }
+
+    // Step 4: Clear needs_enrichment flag
+    if (job.needs_enrichment !== false) {
+      job.needs_enrichment = false;
+      updated = true;
+    }
+
+    // Save job if updated
+    if (updated) {
+      await env.DATA.put(`job:${jobId}`, JSON.stringify(job));
+    }
+
+    // Check if job now qualifies for matching
+    const canMatch = !!(job.embedding && (job.structured_requirements || job.description));
+    
+    return Response.json({
+      ok: true,
+      updated,
+      enrichment_steps: enrichmentSteps,
+      can_match: canMatch,
+      job: {
+        id: job.id,
+        title: job.title,
+        company: job.company,
+        has_full_desc: !!job.full_description,
+        has_structured: !!job.structured_requirements,
+        has_embedding: !!job.embedding,
+        needs_enrichment: !!job.needs_enrichment
+      }
+    }, { headers: cors });
+
+  } catch (error) {
+    return Response.json({ ok: false, error: error.message }, { status: 500, headers: cors });
+  }
 }
 
 // ── Admin: Wipe all jobs ─────────────────────────────────────────────────────
