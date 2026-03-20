@@ -1146,11 +1146,29 @@
       btn.disabled = true;
       btn.textContent = 'Searching for jobs...';
       try {
+        // Step 1: Fetch new jobs from Adzuna (fast — no parsing)
         const res = await fetch(`${API}/admin/sync-jobs?pin=7714`, { method: 'POST', headers: authHeaders() });
         const data = await res.json();
-        toast('Found ' + (data.new_jobs || 0) + ' new jobs! Computing matches...');
+        const newCount = data.new_jobs || 0;
+        toast('Found ' + newCount + ' new jobs! Enriching...');
+
+        // Step 2: Enrich all unenriched jobs (scrape + parse + embed, 1 at a time)
+        if (newCount > 0) {
+          let enriched = 0;
+          let offset = 0;
+          while (true) {
+            btn.textContent = `Enriching jobs... (${enriched}/${newCount})`;
+            const sc = await fetch(`${API}/admin/scrape-jobs?pin=7714&offset=${offset}&limit=1&unenriched=true`, { method: 'POST' });
+            const sd = await sc.json();
+            if (sd.reparsed) enriched += sd.reparsed;
+            if (sd.scraped) enriched += sd.scraped;
+            if (!sd.next_offset) break;
+            offset = sd.next_offset;
+          }
+        }
+
+        // Step 3: Compute matches
         btn.textContent = 'Computing matches...';
-        // Batch recompute synchronously
         const userId = currentUser?.id;
         let offset = 0;
         while (true) {
@@ -1159,25 +1177,8 @@
           if (!rd.next_offset) break;
           offset = rd.next_offset;
         }
-        // Scrape full JDs for matches (batches of 3) and re-parse skills
-        btn.textContent = 'Enriching top matches...';
-        offset = 0;
-        while (true) {
-          const sc = await fetch(`${API}/admin/scrape-jobs?pin=7714&userId=${userId}&minScore=0&offset=${offset}&limit=1`, { method: 'POST' });
-          const sd = await sc.json();
-          if (!sd.next_offset) break;
-          offset = sd.next_offset;
-        }
-        // Recompute matches after enrichment for updated scores
-        btn.textContent = 'Finalizing scores...';
-        offset = 0;
-        while (true) {
-          const rc = await fetch(`${API}/admin/recompute-matches?pin=7714&sync=true&userId=${userId}&offset=${offset}&limit=30`, { method: 'POST' });
-          const rd = await rc.json();
-          if (!rd.next_offset) break;
-          offset = rd.next_offset;
-        }
         await loadMatches();
+        toast('Matches updated!');
       } catch(e) { toast('Search failed: ' + e.message, 'error'); }
       btn.disabled = false;
       btn.textContent = 'Find New Jobs';
