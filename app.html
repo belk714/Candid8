@@ -923,30 +923,30 @@
                 }
               </div>
               ${whyJob ? `<div style="font-size:.8rem;color:var(--text-muted);margin-top:6px;font-style:italic">${whyJob}</div>` : ''}
-              ${matchedSkills.length ? `<div class="tags" style="margin-top:8px">${matchedSkills.slice(0,6).map(s=>`<span class="tag matched">${s}</span>`).join('')}</div>` : ''}
-              ${missingDetail.length ? `<div class="tags" style="margin-top:4px">${missingDetail.slice(0,4).map(g=>{
+              ${matchedSkills.length ? `<div class="tags" style="margin-top:8px">${matchedSkills.map(s=>`<span class="tag matched">${s}</span>`).join('')}${matchedSkills.length > 8 ? `<span class="tag" style="opacity:0.7;font-style:italic">+${matchedSkills.length - 8} more</span>` : ''}</div>` : ''}
+              ${missingDetail.length ? `<div class="tags" style="margin-top:4px">${missingDetail.slice(0,6).map(g=>{
                 const sk = typeof g === 'string' ? g : g.skill || g.job_skill || g;
                 const closest = (typeof g === 'object' && g.closest_user_skill && g.similarity > 30) ? ` → ${g.closest_user_skill} ${g.similarity}%` : '';
                 return '<span class="tag missing">'+sk+'<span style="font-size:.7rem;color:var(--text-muted);margin-left:4px">'+closest+'</span></span>';
-              }).join('')}</div>` : (missingSimple.length ? `<div class="tags" style="margin-top:4px">${missingSimple.slice(0,4).map(s=>`<span class="tag missing">${typeof s === 'string' ? s : s.skill || s}</span>`).join('')}</div>` : '')}
+              }).join('')}${missingDetail.length > 6 ? `<span class="tag missing" style="opacity:0.7;font-style:italic">+${missingDetail.length - 6} more gaps</span>` : ''}</div>` : (missingSimple.length ? `<div class="tags" style="margin-top:4px">${missingSimple.slice(0,6).map(s=>`<span class="tag missing">${typeof s === 'string' ? s : s.skill || s}</span>`).join('')}${missingSimple.length > 6 ? `<span class="tag missing" style="opacity:0.7;font-style:italic">+${missingSimple.length - 6} more</span>` : ''}</div>` : '')}
               <div class="match-detail" id="detail-${m.job.id}">
                 <div class="quick-view" style="display:none">
                   ${isDetailed ? `
                     <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.recommendation || b.summary || ''}</p>
                     ${breakdownBar('Skills', b.skills_match)}
-                    ${b.matched_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--green)">Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag matched" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div></div>' : ''}
-                    ${b.missing_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--amber)">Gaps:</span> ' + b.missing_skills.map(function(s){return '<span class="tag missing" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div></div>' : ''}
-                    ${breakdownBar('Experience', b.experience_match != null && b.experience_match <= 10 ? b.experience_match * 10 : b.experience_match)}
+                    ${b.matched_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--green)">Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag matched" style="font-size:.7rem">'+s+'</span>'}).join(' ') + (b.matched_skills.length > 8 ? ` <span style="font-size:.7rem;opacity:0.7">(+${b.matched_skills.length - 8} more)</span>` : '') + '</div></div>' : ''}
+                    ${b.missing_skills?.length ? '<div class="breakdown-detail"><div style="margin:4px 0"><span class="detail-label" style="color:var(--amber)">Gaps:</span> ' + b.missing_skills.slice(0,8).map(function(s){return '<span class="tag missing" style="font-size:.7rem">'+s+'</span>'}).join(' ') + (b.missing_skills.length > 8 ? ` <span style="font-size:.7rem;opacity:0.7">(+${b.missing_skills.length - 8} more)</span>` : '') + '</div></div>' : ''}
+                    ${breakdownBar('Experience', b.experience_match)}
                     ${b.experience_analysis ? `<div class="breakdown-detail"><span class="detail-stat" style="font-size:.8rem">${b.experience_analysis}</span></div>` : ''}
-                    ${breakdownBar('Industry', (b.industry_match || b.industry_bonus) != null && (b.industry_match || b.industry_bonus) <= 5 ? (b.industry_match || b.industry_bonus) * 20 : (b.industry_match || b.industry_bonus))}
+                    ${breakdownBar('Industry', b.industry_match || b.industry_bonus)}
                     ${b.industry_analysis ? `<div class="breakdown-detail"><span class="detail-stat" style="font-size:.8rem">${b.industry_analysis}</span></div>` : ''}
-                    ${breakdownBar('Education', b.education_match != null && b.education_match <= 5 ? b.education_match * 20 : b.education_match)}
+                    ${breakdownBar('Education', b.education_match)}
                   ` : hasScore ? `
                     <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.summary || displayScore + '% skills-first match'}</p>
                     ${breakdownBar('Skills', m.skills_overlap_pct || b.skills_match)}
-                    ${breakdownBar('Experience', b.experience_match != null ? b.experience_match * 10 : (m.experience_fit || 50))}
-                    ${breakdownBar('Industry', b.industry_bonus != null ? b.industry_bonus * 20 : (m.industry_bonus || 50))}
-                    ${breakdownBar('Education', b.education_match != null ? b.education_match * 20 : (m.education_fit || 50))}
+                    ${breakdownBar('Experience', b.experience_match || m.experience_fit || 50)}
+                    ${breakdownBar('Industry', b.industry_bonus || m.industry_bonus || 50)}
+                    ${breakdownBar('Education', b.education_match || m.education_fit || 50)}
                   ` : `
                     <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">Click "Analyze Fit" to get an AI-powered fit score and detailed breakdown.</p>
                   `}
@@ -1031,13 +1031,13 @@
           quickView.innerHTML = `
             ${b.recommendation ? `<p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">${b.recommendation}</p>` : ''}
             ${breakdownBar('Skills', b.skills_match)}
-            ${b.matched_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--green);font-size:.8rem;font-weight:600">Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag matched" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div>' : ''}
-            ${b.missing_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--amber);font-size:.8rem;font-weight:600">Gaps:</span> ' + b.missing_skills.map(function(s){return '<span class="tag missing" style="font-size:.7rem">'+s+'</span>'}).join(' ') + '</div>' : ''}
-            ${breakdownBar('Experience', b.experience_match != null && b.experience_match <= 10 ? b.experience_match * 10 : b.experience_match)}
+            ${b.matched_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--green);font-size:.8rem;font-weight:600">Matched:</span> ' + b.matched_skills.map(function(s){return '<span class="tag matched" style="font-size:.7rem">'+s+'</span>'}).join(' ') + (b.matched_skills.length > 10 ? ` <span style="font-size:.7rem;opacity:0.7">(+${b.matched_skills.length - 10} more)</span>` : '') + '</div>' : ''}
+            ${b.missing_skills?.length ? '<div style="margin:4px 0 8px"><span style="color:var(--amber);font-size:.8rem;font-weight:600">Gaps:</span> ' + b.missing_skills.slice(0,8).map(function(s){return '<span class="tag missing" style="font-size:.7rem">'+s+'</span>'}).join(' ') + (b.missing_skills.length > 8 ? ` <span style="font-size:.7rem;opacity:0.7">(+${b.missing_skills.length - 8} more)</span>` : '') + '</div>' : ''}
+            ${breakdownBar('Experience', b.experience_match)}
             ${b.experience_analysis ? '<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">' + b.experience_analysis + '</p>' : ''}
-            ${breakdownBar('Industry', b.industry_match != null && b.industry_match <= 5 ? b.industry_match * 20 : b.industry_match)}
+            ${breakdownBar('Industry', b.industry_match)}
             ${b.industry_analysis ? '<p style="font-size:.8rem;color:var(--text-muted);margin:4px 0 8px">' + b.industry_analysis + '</p>' : ''}
-            ${breakdownBar('Education', b.education_match != null && b.education_match <= 5 ? b.education_match * 20 : b.education_match)}
+            ${breakdownBar('Education', b.education_match)}
             ${b.strengths?.length ? '<div style="margin-top:12px"><strong style="font-size:.85rem;color:var(--green)">Strengths:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.strengths.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
             ${b.gaps?.length ? '<div style="margin-top:8px"><strong style="font-size:.85rem;color:var(--amber)">Gaps:</strong><ul style="margin:4px 0 0 16px;font-size:.85rem;color:var(--text-muted)">' + b.gaps.map(function(s){return '<li>'+s+'</li>'}).join('') + '</ul></div>' : ''}
           `;
@@ -1550,13 +1550,13 @@
           ${b.recommendation ? `<div style="background:var(--surface2);border-radius:8px;padding:12px 16px;margin-bottom:16px"><p style="font-size:.9rem;margin:0">${b.recommendation}</p></div>` : ''}
           ${breakdownBar('Skills', b.skills_match)}
           ${b.skills_analysis ? `<p class="analysis-text" style="padding-left:0"><strong>Skills:</strong> ${b.skills_analysis}</p>` : ''}
-          ${b.matched_skills?.length ? `<div style="margin-bottom:4px"><strong style="font-size:.8rem">Matched:</strong> ${b.matched_skills.map(s=>`<span class="tag matched" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
-          ${b.missing_skills?.length ? `<div style="margin-bottom:8px"><strong style="font-size:.8rem;color:var(--amber)">Missing:</strong> ${b.missing_skills.map(s=>`<span class="tag missing" style="font-size:.7rem">${s}</span>`).join(' ')}</div>` : ''}
-          ${breakdownBar('Experience', b.experience_match != null && b.experience_match <= 10 ? b.experience_match * 10 : b.experience_match)}
+          ${b.matched_skills?.length ? `<div style="margin-bottom:4px"><strong style="font-size:.8rem">Matched:</strong> ${b.matched_skills.map(s=>`<span class="tag matched" style="font-size:.7rem">${s}</span>`).join(' ')}${b.matched_skills.length > 10 ? ` <span style="font-size:.7rem;opacity:0.7">(+${b.matched_skills.length - 10} more)</span>` : ''}</div>` : ''}
+          ${b.missing_skills?.length ? `<div style="margin-bottom:8px"><strong style="font-size:.8rem;color:var(--amber)">Missing:</strong> ${b.missing_skills.slice(0,8).map(s=>`<span class="tag missing" style="font-size:.7rem">${s}</span>`).join(' ')}${b.missing_skills.length > 8 ? ` <span style="font-size:.7rem;opacity:0.7">(+${b.missing_skills.length - 8} more)</span>` : ''}</div>` : ''}
+          ${breakdownBar('Experience', b.experience_match)}
           ${b.experience_analysis ? `<p class="analysis-text" style="padding-left:0">${b.experience_analysis}</p>` : ''}
-          ${breakdownBar('Industry', b.industry_match != null && b.industry_match <= 5 ? b.industry_match * 20 : b.industry_match)}
+          ${breakdownBar('Industry', b.industry_match)}
           ${b.industry_analysis ? `<p class="analysis-text" style="padding-left:0">${b.industry_analysis}</p>` : ''}
-          ${breakdownBar('Education', b.education_match != null && b.education_match <= 5 ? b.education_match * 20 : b.education_match)}
+          ${breakdownBar('Education', b.education_match)}
           ${b.education_analysis ? `<p class="analysis-text" style="padding-left:0">${b.education_analysis}</p>` : ''}
           ${b.leadership_match != null ? breakdownBar('Leadership', b.leadership_match) : ''}
           ${b.leadership_analysis ? `<p class="analysis-text" style="padding-left:0">${b.leadership_analysis}</p>` : ''}
