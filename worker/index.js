@@ -1540,9 +1540,9 @@ async function handleGetMatches(request, env, cors) {
 
     const breakdown = JSON.parse(m.breakdown || '{}');
     
-    // Display threshold: don't show matches below 75%
+    // Display threshold: show matches 40%+ (scores improve after enrichment)
     const displayScore = m.composite_score ?? m.score;
-    if (displayScore != null && displayScore < 75) continue;
+    if (displayScore != null && displayScore < 40) continue;
     
     matches.push({
       id: m.id,

@@ -1143,11 +1143,22 @@
     async function triggerJobSync() {
       const btn = document.getElementById('findJobsBtn');
       btn.disabled = true;
-      btn.textContent = 'Refreshing matches...';
+      btn.textContent = 'Matching jobs...';
       try {
+        const userId = currentUser?.id;
+        // Quick recompute in batches of 50 (fast — no external calls)
+        let offset = 0;
+        while (true) {
+          btn.textContent = `Matching jobs... (${offset})`;
+          const rc = await fetch(`${API}/admin/recompute-matches?pin=7714&sync=true&userId=${userId}&offset=${offset}&limit=50`, { method: 'POST' });
+          const rd = await rc.json();
+          if (!rd.ok) break;
+          if (!rd.next_offset) break;
+          offset = rd.next_offset;
+        }
         await loadMatches();
-        toast('Matches loaded! Jobs sync automatically every 6 hours.');
-      } catch(e) { toast('Failed to load matches: ' + e.message, 'error'); }
+        toast('Matches updated!');
+      } catch(e) { toast('Match failed: ' + e.message, 'error'); }
       btn.disabled = false;
       btn.textContent = 'Refresh Matches';
     }
