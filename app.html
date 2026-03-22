@@ -1149,31 +1149,10 @@
         const res = await fetch(`${API}/admin/sync-jobs?pin=7714`, { method: 'POST', headers: authHeaders() });
         const data = await res.json();
         const newCount = data.new_jobs || 0;
-        toast('Found ' + newCount + ' new jobs! Enriching...');
+        const totalJobs = data.total_jobs || 0;
+        toast(`Found ${newCount} new jobs (${totalJobs} total). Computing matches...`);
 
-        // Step 2: Enrich all unenriched jobs (scrape + parse + embed, 1 at a time)
-        if (newCount > 0) {
-          let enriched = 0;
-          let offset = 0;
-          while (true) {
-            btn.textContent = `Enriching jobs... (${enriched}/${newCount})`;
-            try {
-              const sc = await fetch(`${API}/admin/scrape-jobs?pin=7714&offset=${offset}&limit=1&unenriched=true`, { method: 'POST' });
-              const sd = await sc.json();
-              if (sd.reparsed) enriched += sd.reparsed;
-              if (sd.scraped) enriched += sd.scraped;
-              if (!sd.next_offset) break;
-              offset = sd.next_offset;
-            } catch (e) {
-              console.warn('Enrichment batch failed, skipping:', e);
-              enriched++;
-              offset++;
-              if (offset >= newCount) break;
-            }
-          }
-        }
-
-        // Step 3: Compute matches
+        // Step 2: Compute matches (enrichment happens via background cron)
         btn.textContent = 'Computing matches...';
         const userId = currentUser?.id;
         let offset = 0;
