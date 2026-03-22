@@ -401,7 +401,7 @@
           </div>
         </div>
         <!-- Find Jobs Button -->
-        <button class="btn" id="findJobsBtn" onclick="triggerJobSync()" style="width:100%;margin-bottom:20px;padding:14px;font-size:1rem">Find New Jobs</button>
+        <button class="btn" id="findJobsBtn" onclick="triggerJobSync()" style="width:100%;margin-bottom:20px;padding:14px;font-size:1rem">Refresh Matches</button>
         <!-- Job List -->
         <div id="matchesContent"><div class="loading-overlay"><div class="spinner"></div> Loading matches...</div></div>
       </div>
@@ -1143,35 +1143,13 @@
     async function triggerJobSync() {
       const btn = document.getElementById('findJobsBtn');
       btn.disabled = true;
-      btn.textContent = 'Searching for jobs...';
+      btn.textContent = 'Refreshing matches...';
       try {
-        // Step 1: Fetch new jobs from Adzuna (fast — no parsing)
-        const res = await fetch(`${API}/admin/sync-jobs?pin=7714`, { method: 'POST', headers: authHeaders() });
-        const data = await res.json();
-        const newCount = data.new_jobs || 0;
-        const totalJobs = data.total_jobs || 0;
-        toast(`Found ${newCount} new jobs (${totalJobs} total). Computing matches...`);
-
-        // Step 2: Compute matches (enrichment happens via background cron)
-        btn.textContent = 'Computing matches...';
-        const userId = currentUser?.id;
-        let offset = 0;
-        let batchNum = 0;
-        while (true) {
-          const rc = await fetch(`${API}/admin/recompute-matches?pin=7714&sync=true&userId=${userId}&offset=${offset}&limit=200`, { method: 'POST' });
-          const rd = await rc.json();
-          batchNum++;
-          btn.textContent = `Computing matches... (${Math.min(offset + 200, rd.total_jobs || 0)}/${rd.total_jobs || '?'})`;
-          // Show results after first batch so user sees progress
-          if (batchNum === 1 && rd.matched > 0) await loadMatches();
-          if (!rd.next_offset) break;
-          offset = rd.next_offset;
-        }
         await loadMatches();
-        toast('Matches updated!');
-      } catch(e) { toast('Search failed: ' + e.message, 'error'); }
+        toast('Matches loaded! Jobs sync automatically every 6 hours.');
+      } catch(e) { toast('Failed to load matches: ' + e.message, 'error'); }
       btn.disabled = false;
-      btn.textContent = 'Find New Jobs';
+      btn.textContent = 'Refresh Matches';
     }
 
     // ── Saved Jobs ──
