@@ -2768,10 +2768,14 @@ async function getEmbedding(env, text) {
 async function scrapeFullDescription(url) {
   if (!url) return null;
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-      redirect: 'follow'
+      redirect: 'follow',
+      signal: controller.signal
     });
+    clearTimeout(timeout);
     const html = await res.text();
     // Try Adzuna-specific extraction first
     const adpMatch = html.match(/adp-body[^>]*>([\s\S]*?)<\/section/);
@@ -3404,7 +3408,10 @@ async function handleScrapeJobs(url, env, cors) {
       // Scrape if we don't have full description yet
       if (!fullDesc || fullDesc.length <= 1000) {
         if (!job.url) { skipped++; continue; }
-        const res = await fetch(job.url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }, redirect: 'follow' });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(job.url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }, redirect: 'follow', signal: controller.signal });
+        clearTimeout(timeout);
         const html = await res.text();
         const match = html.match(/adp-body[^>]*>([\s\S]*?)<\/section/);
         fullDesc = null;
