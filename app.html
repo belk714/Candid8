@@ -1156,9 +1156,14 @@
         btn.textContent = 'Computing matches...';
         const userId = currentUser?.id;
         let offset = 0;
+        let batchNum = 0;
         while (true) {
-          const rc = await fetch(`${API}/admin/recompute-matches?pin=7714&sync=true&userId=${userId}&offset=${offset}&limit=30`, { method: 'POST' });
+          const rc = await fetch(`${API}/admin/recompute-matches?pin=7714&sync=true&userId=${userId}&offset=${offset}&limit=200`, { method: 'POST' });
           const rd = await rc.json();
+          batchNum++;
+          btn.textContent = `Computing matches... (${Math.min(offset + 200, rd.total_jobs || 0)}/${rd.total_jobs || '?'})`;
+          // Show results after first batch so user sees progress
+          if (batchNum === 1 && rd.matched > 0) await loadMatches();
           if (!rd.next_offset) break;
           offset = rd.next_offset;
         }
