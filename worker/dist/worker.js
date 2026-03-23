@@ -38331,6 +38331,10 @@ async function handleRecomputeMatches(url, env, cors) {
     const userYoe = profile.structured_data?.years_of_experience || 0;
     const userSenLevel = userYoe >= 20 ? 5 : userYoe >= 15 ? 4 : userYoe >= 8 ? 3 : userYoe >= 3 ? 2 : 1;
     let matchIds = offset > 0 ? JSON.parse(await env.DATA.get(`user_matches:${uid}`) || "[]") : [];
+    if (offset === 0) {
+      const oldMatchIds = JSON.parse(await env.DATA.get(`user_matches:${uid}`) || "[]");
+      for (const mid of oldMatchIds) await env.DATA.delete(`match:${mid}`);
+    }
     let matched = 0, filtered = 0;
     for (const jobId of jobIds) {
       let job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");

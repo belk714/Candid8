@@ -3972,6 +3972,11 @@ async function handleRecomputeMatches(url, env, cors) {
 
     // Load existing match IDs if continuing from previous batch
     let matchIds = offset > 0 ? JSON.parse(await env.DATA.get(`user_matches:${uid}`) || '[]') : [];
+    // Clean up old match objects when starting fresh recompute
+    if (offset === 0) {
+      const oldMatchIds = JSON.parse(await env.DATA.get(`user_matches:${uid}`) || '[]');
+      for (const mid of oldMatchIds) await env.DATA.delete(`match:${mid}`);
+    }
     let matched = 0, filtered = 0;
 
     for (const jobId of jobIds) {
