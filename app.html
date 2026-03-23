@@ -1010,17 +1010,16 @@
         }).join('');
         
         if (loadMore) {
-          // Append new matches to existing content, but remove the load more button first
+          // Append new matches, removing old load more button first
           const existingLoadMore = el.querySelector('.load-more-container');
           if (existingLoadMore) existingLoadMore.remove();
-          
           el.insertAdjacentHTML('beforeend', matchesHtml);
         } else {
           // Replace content with new matches
           el.innerHTML = matchesHtml;
         }
         
-        currentMatchOffset = offset + data.matches.length;
+        currentMatchOffset = data.cursor ?? (offset + data.matches.length);
         
         // Add "Load More" button if there are more matches
         if (data.has_more) {

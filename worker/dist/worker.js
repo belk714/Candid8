@@ -36678,13 +36678,21 @@ async function handleGetMatches(request, env, cors) {
   const offset = parseInt(url.searchParams.get("offset") || "0");
   const matchesJson = await env.DATA.get(`user_matches:${userId}`) || "[]";
   const allMatchIds = JSON.parse(matchesJson);
-  const totalCount = allMatchIds.length;
-  const matchIds = allMatchIds.slice(offset, offset + limit);
+  const dedupedMatchIds = [...new Set(allMatchIds)];
   const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
   const matches = [];
-  for (const id of matchIds) {
+  const seenJobIds = /* @__PURE__ */ new Set();
+  let cursor = offset;
+  const maxReads = Math.min(dedupedMatchIds.length, 80);
+  let reads = 0;
+  while (matches.length < limit && cursor < dedupedMatchIds.length && reads < maxReads) {
+    const id = dedupedMatchIds[cursor];
+    cursor++;
+    reads++;
     const m2 = JSON.parse(await env.DATA.get(`match:${id}`) || "null");
     if (!m2) continue;
+    if (seenJobIds.has(m2.job_id)) continue;
+    seenJobIds.add(m2.job_id);
     const job = JSON.parse(await env.DATA.get(`job:${m2.job_id}`) || "null");
     if (!job) continue;
     if (settings.salary_min && job.salary_max && typeof job.salary_max === "number" && job.salary_max > 0 && job.salary_max < settings.salary_min) continue;
@@ -36715,10 +36723,11 @@ async function handleGetMatches(request, env, cors) {
   return Response.json({
     ok: true,
     matches,
-    total_count: totalCount,
+    total_count: dedupedMatchIds.length,
+    cursor,
     limit,
     offset,
-    has_more: offset + limit < totalCount
+    has_more: cursor < dedupedMatchIds.length
   }, { headers: cors });
 }
 async function handleGetMatchDetail(request, env, cors, jobId) {

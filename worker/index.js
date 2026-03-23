@@ -2032,16 +2032,30 @@ async function handleGetMatches(request, env, cors) {
   
   const matchesJson = await env.DATA.get(`user_matches:${userId}`) || '[]';
   const allMatchIds = JSON.parse(matchesJson);
-  const totalCount = allMatchIds.length;
-  
-  // Apply pagination to match IDs
-  const matchIds = allMatchIds.slice(offset, offset + limit);
+  // Dedup match IDs
+  const dedupedMatchIds = [...new Set(allMatchIds)];
   const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || '{}');
   
+  // Process matches with over-fetch to fill the page despite filtering.
+  // Track cursor position for resumable pagination.
   const matches = [];
-  for (const id of matchIds) {
+  const seenJobIds = new Set();
+  let cursor = offset; // start from offset in the deduped ID list
+  const maxReads = Math.min(dedupedMatchIds.length, 80); // read up to 80 (~160 KV ops) to stay under 30s
+  let reads = 0;
+  
+  while (matches.length < limit && cursor < dedupedMatchIds.length && reads < maxReads) {
+    const id = dedupedMatchIds[cursor];
+    cursor++;
+    reads++;
+    
     const m = JSON.parse(await env.DATA.get(`match:${id}`) || 'null');
     if (!m) continue;
+    
+    // Dedup by job_id
+    if (seenJobIds.has(m.job_id)) continue;
+    seenJobIds.add(m.job_id);
+    
     const job = JSON.parse(await env.DATA.get(`job:${m.job_id}`) || 'null');
     if (!job) continue;
 
@@ -2077,15 +2091,17 @@ async function handleGetMatches(request, env, cors) {
     });
   }
   
-  // Sort by composite score
+  // Sort this page by composite score
   matches.sort((a, b) => (b.composite_score ?? b.score ?? -1) - (a.composite_score ?? a.score ?? -1));
+  
   return Response.json({ 
     ok: true, 
     matches, 
-    total_count: totalCount,
+    total_count: dedupedMatchIds.length,
+    cursor,
     limit,
     offset,
-    has_more: offset + limit < totalCount
+    has_more: cursor < dedupedMatchIds.length
   }, { headers: cors });
 }
 
