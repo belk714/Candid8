@@ -35819,9 +35819,15 @@ async function matchJobsAgainstAllUsers(env, newJobIds) {
       const alertedJobIds = new Set(JSON.parse(alertedJson));
       const existingMatchesJson = await env.DATA.get(`user_matches:${userId}`) || "[]";
       const existingMatchIds = JSON.parse(existingMatchesJson);
+      const existingJobIds = /* @__PURE__ */ new Set();
+      for (const mid of existingMatchIds) {
+        const em = JSON.parse(await env.DATA.get(`match:${mid}`) || "null");
+        if (em) existingJobIds.add(em.job_id);
+      }
       const newMatchIds = [];
       for (const jobId of newJobIds) {
         if (alertedJobIds.has(jobId)) continue;
+        if (existingJobIds.has(jobId)) continue;
         const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || "null");
         if (!job || !job.embedding) continue;
         if (!jobMatchesLocationFilter(job, locations, radius)) continue;

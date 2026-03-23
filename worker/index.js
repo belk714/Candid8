@@ -842,10 +842,17 @@ async function matchJobsAgainstAllUsers(env, newJobIds) {
       // Load existing matches
       const existingMatchesJson = await env.DATA.get(`user_matches:${userId}`) || '[]';
       const existingMatchIds = JSON.parse(existingMatchesJson);
+      // Build set of already-matched job IDs for dedup
+      const existingJobIds = new Set();
+      for (const mid of existingMatchIds) {
+        const em = JSON.parse(await env.DATA.get(`match:${mid}`) || 'null');
+        if (em) existingJobIds.add(em.job_id);
+      }
       const newMatchIds = [];
 
       for (const jobId of newJobIds) {
         if (alertedJobIds.has(jobId)) continue;
+        if (existingJobIds.has(jobId)) continue; // Skip already-matched jobs
 
         const job = JSON.parse(await env.DATA.get(`job:${jobId}`) || 'null');
         if (!job || !job.embedding) continue;
