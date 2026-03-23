@@ -38499,6 +38499,11 @@ async function handlePipelineStatus(url, env, cors) {
 async function handleTriggerPipeline(url, env, cors) {
   const pin = url.searchParams.get("pin");
   if (pin !== "7714") return Response.json({ ok: false, error: "Invalid PIN" }, { status: 403, headers: cors });
+  if (env._ctx && env._ctx.waitUntil) {
+    env._ctx.waitUntil(pipelineDispatcher(env).catch((e2) => console.error("Pipeline error:", e2.message)));
+    const state = JSON.parse(await env.DATA.get("pipeline_state") || "{}");
+    return Response.json({ ok: true, message: "Pipeline triggered in background", current_stage: state.stage || "idle" }, { headers: cors });
+  }
   try {
     const result = await pipelineDispatcher(env);
     return Response.json({ ok: true, result }, { headers: cors });
