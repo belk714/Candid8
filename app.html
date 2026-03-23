@@ -1189,13 +1189,13 @@
           }
           
           // Job stats
-          const stats = data.stats || {};
-          if (stats.total_jobs) {
-            const unenriched = stats.unenriched_count || 0;
+          const jobStats = stats || {};
+          if (jobStats.total_jobs) {
+            const unenriched = jobStats.unenriched_count || 0;
             if (unenriched > 0) {
-              parts.push(`${stats.total_jobs} jobs (${unenriched} processing)`);
+              parts.push(`${jobStats.total_jobs} jobs (${unenriched} processing)`);
             } else {
-              parts.push(`${stats.total_jobs} jobs indexed`);
+              parts.push(`${jobStats.total_jobs} jobs indexed`);
             }
           }
           
