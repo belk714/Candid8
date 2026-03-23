@@ -37,13 +37,24 @@ const BROAD_CATEGORIES = [
 
 export default {
   async scheduled(event, env, ctx) {
-    // Cron trigger: Use the unified pipeline
+    // New staged pipeline dispatcher
     try {
-      console.log('Starting cron job sync...');
-      const result = await runUnifiedJobPipeline(env, { cronTrigger: true });
-      console.log(`Cron sync complete: ${result.new_jobs} new jobs, ${result.total_index} total`);
+      console.log('Starting pipeline dispatcher...');
+      const result = await pipelineDispatcher(env);
+      console.log(`Pipeline stage complete: ${JSON.stringify(result)}`);
     } catch (e) {
-      console.error('Cron sync error:', e.message);
+      console.error('Pipeline error:', e.message);
+      // Store error in pipeline state
+      try {
+        const stateJson = await env.DATA.get('pipeline_state') || '{}';
+        const state = JSON.parse(stateJson);
+        state.errors = state.errors || [];
+        state.errors.push({ time: new Date().toISOString(), error: e.message });
+        state.errors = state.errors.slice(-10); // Keep last 10 errors
+        await env.DATA.put('pipeline_state', JSON.stringify(state));
+      } catch (storeErr) {
+        console.error('Failed to store pipeline error:', storeErr.message);
+      }
     }
   },
 
@@ -298,6 +309,420 @@ async function runUnifiedJobPipeline(env, options = {}) {
     console.error('Unified pipeline error:', error.message);
     throw error;
   }
+}
+
+// ── Pipeline State Machine ──────────────────────────────────────────────────
+
+async function pipelineDispatcher(env) {
+  // Read current state
+  const stateJson = await env.DATA.get('pipeline_state') || '{}';
+  const state = JSON.parse(stateJson);
+  
+  const now = new Date().toISOString();
+  const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+  
+  // Initialize state if needed
+  if (!state.stage) {
+    state.stage = 'idle';
+    state.cursor = 0;
+    state.run_id = uuid();
+    state.started_at = now;
+    state.errors = [];
+  }
+
+  console.log(`Pipeline state: ${state.stage}, cursor: ${state.cursor}`);
+  
+  let result = { action: 'none', stage: state.stage };
+  
+  switch (state.stage) {
+    case 'idle':
+    case undefined:
+    case null:
+      // Check if sync is needed (>5 hours since last sync)
+      const lastSync = state.last_sync;
+      if (!lastSync || lastSync < fiveHoursAgo) {
+        console.log('Starting sync stage');
+        state.stage = 'sync';
+        state.cursor = 0;
+        state.run_id = uuid();
+        state.started_at = now;
+        await env.DATA.put('pipeline_state', JSON.stringify(state));
+        
+        const syncResult = await stageSync(env);
+        state.last_sync = now;
+        result = { action: 'sync', ...syncResult };
+        
+        // Move to enrich if there are new jobs
+        if (syncResult.new_jobs > 0) {
+          state.stage = 'enrich';
+          state.cursor = 0;
+        } else {
+          // Check if there are unenriched jobs from previous runs
+          const needsEnrich = await countUnenrichedJobs(env);
+          if (needsEnrich > 0) {
+            state.stage = 'enrich';
+            state.cursor = 0;
+          } else {
+            // Check if there are unmatched enriched jobs
+            const needsMatch = await getEnrichedUnmatchedJobs(env);
+            if (needsMatch.length > 0) {
+              state.stage = 'match';
+            } else {
+              state.stage = 'idle';
+            }
+          }
+        }
+      } else {
+        // Check for enrichment work
+        const needsEnrich = await countUnenrichedJobs(env);
+        if (needsEnrich > 0) {
+          console.log('Starting enrich stage');
+          state.stage = 'enrich';
+          state.cursor = 0;
+          state.run_id = uuid();
+          state.started_at = now;
+        } else {
+          // Check for matching work  
+          const needsMatch = await getEnrichedUnmatchedJobs(env);
+          if (needsMatch.length > 0) {
+            console.log('Starting match stage');
+            state.stage = 'match';
+            state.run_id = uuid();
+            state.started_at = now;
+          } else {
+            result = { action: 'idle', message: 'No work needed' };
+          }
+        }
+      }
+      break;
+      
+    case 'sync':
+      const syncResult = await stageSync(env);
+      state.last_sync = now;
+      result = { action: 'sync', ...syncResult };
+      
+      // Always move to enrich after sync
+      state.stage = 'enrich';
+      state.cursor = 0;
+      break;
+      
+    case 'enrich':
+      const enrichResult = await stageEnrich(env, state.cursor);
+      state.last_enrich = now;
+      state.cursor = enrichResult.cursor;
+      result = { action: 'enrich', ...enrichResult };
+      
+      if (enrichResult.remaining === 0) {
+        // No more jobs to enrich, move to match
+        state.stage = 'match';
+      }
+      break;
+      
+    case 'match':
+      const matchResult = await stageMatch(env);
+      state.last_match = now;
+      result = { action: 'match', ...matchResult };
+      
+      // Always return to idle after match
+      state.stage = 'idle';
+      state.cursor = 0;
+      break;
+  }
+  
+  // Save updated state
+  await env.DATA.put('pipeline_state', JSON.stringify(state));
+  
+  return result;
+}
+
+async function stageSync(env) {
+  console.log('Running sync stage...');
+  
+  // Load existing adzuna IDs for fast dedup
+  const adzunaIdsJson = await env.DATA.get('adzuna_ids_index') || '{}';
+  const existingAdzunaIds = new Set(Object.keys(JSON.parse(adzunaIdsJson)));
+  
+  const seenIds = new Set();
+  const allJobs = [];
+
+  // Gather all user locations and user-specific queries (reuse logic from runUnifiedJobPipeline)
+  const allUserLocations = new Set();
+  const allUserQueries = new Set();
+  const usersJson = await env.DATA.get('users_index') || '[]';
+  const userIds = JSON.parse(usersJson);
+  
+  for (const uid of userIds) {
+    const s = JSON.parse(await env.DATA.get(`user_settings:${uid}`) || '{}');
+    if (s.locations?.length) s.locations.forEach(l => allUserLocations.add(l.split(',')[0].trim()));
+    const uq = JSON.parse(await env.DATA.get(`user_queries:${uid}`) || '[]');
+    uq.forEach(q => allUserQueries.add(q));
+  }
+  const locationList = [...allUserLocations];
+  if (locationList.length === 0) locationList.push('');
+
+  // Phase 1: User-specific queries (primary)
+  const userQueryList = [...allUserQueries].slice(0, 30);
+  
+  // Phase 2: Broad categories as safety net
+  const cronFetchTasks = [];
+  for (const query of userQueryList) {
+    for (const loc of locationList) {
+      cronFetchTasks.push({ query, loc, phase: 'user' });
+    }
+  }
+  for (const category of BROAD_CATEGORIES) {
+    for (const loc of locationList) {
+      cronFetchTasks.push({ query: category, loc, phase: 'broad' });
+    }
+  }
+
+  console.log(`Fetching jobs: ${cronFetchTasks.length} query/location combinations`);
+  
+  // Fetch jobs in parallel batches of 10
+  for (let i = 0; i < cronFetchTasks.length; i += 10) {
+    const batch = cronFetchTasks.slice(i, i + 10);
+    const results = await Promise.allSettled(batch.map(async ({ query, loc }) => {
+      const params = new URLSearchParams({
+        app_id: ADZUNA_APP_ID, app_key: ADZUNA_APP_KEY,
+        results_per_page: '20', what: query,
+        'content-type': 'application/json', sort_by: 'date'
+      });
+      if (loc) params.set('where', loc);
+      const res = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
+      return res.json();
+    }));
+    
+    for (const result of results) {
+      if (result.status !== 'fulfilled' || !result.value?.results) continue;
+      for (const r of result.value.results) {
+        if (seenIds.has(r.id) || existingAdzunaIds.has(String(r.id))) continue;
+        seenIds.add(r.id);
+        allJobs.push({
+          adzuna_id: String(r.id), title: r.title || '', company: r.company?.display_name || 'Unknown',
+          location: r.location?.display_name || '', description: r.description || '',
+          salary_min: r.salary_min || null, salary_max: r.salary_max || null,
+          url: r.redirect_url || '', category: r.category?.label || '',
+          created: r.created || new Date().toISOString()
+        });
+      }
+    }
+  }
+
+  console.log(`Found ${allJobs.length} new jobs`);
+
+  // Store raw jobs with needs_enrichment flag
+  const jobsIndexJson = await env.DATA.get('jobs_index') || '[]';
+  let jobsIndex = JSON.parse(jobsIndexJson);
+  const newJobIds = [];
+  const adzunaIdsIndex = JSON.parse(adzunaIdsJson);
+
+  for (const j of allJobs) {
+    const id = uuid();
+    const job = {
+      id, adzuna_id: j.adzuna_id, title: j.title, company: j.company, location: j.location,
+      description: j.description, salary_min: j.salary_min, salary_max: j.salary_max,
+      url: j.url, category: j.category, source: 'adzuna',
+      created_at: j.created,
+      needs_enrichment: true,
+      embedding: null,
+      structured_requirements: null
+    };
+    await env.DATA.put(`job:${id}`, JSON.stringify(job));
+    newJobIds.push(id);
+    adzunaIdsIndex[j.adzuna_id] = id;
+  }
+
+  // Update indexes
+  if (newJobIds.length > 0) {
+    jobsIndex = [...jobsIndex, ...newJobIds];
+    await env.DATA.put('jobs_index', JSON.stringify(jobsIndex));
+    await env.DATA.put('adzuna_ids_index', JSON.stringify(adzunaIdsIndex));
+  }
+
+  console.log(`Stored ${newJobIds.length} new jobs`);
+  return { new_jobs: newJobIds.length, total_jobs: jobsIndex.length };
+}
+
+async function stageEnrich(env, cursor) {
+  console.log(`Running enrich stage from cursor ${cursor}...`);
+  
+  // Load jobs index and find jobs that need enrichment
+  const jobsIndexJson = await env.DATA.get('jobs_index') || '[]';
+  const jobsIndex = JSON.parse(jobsIndexJson);
+  
+  const jobsToEnrich = [];
+  let checked = 0;
+  let newCursor = cursor;
+  
+  // Scan from cursor to find up to 5 jobs that need enrichment
+  for (let i = cursor; i < jobsIndex.length && jobsToEnrich.length < 5; i++) {
+    const jobId = jobsIndex[i];
+    const jobJson = await env.DATA.get(`job:${jobId}`);
+    if (!jobJson) continue;
+    
+    const job = JSON.parse(jobJson);
+    checked++;
+    newCursor = i + 1;
+    
+    if (job.needs_enrichment === true) {
+      jobsToEnrich.push({ id: jobId, ...job });
+    }
+  }
+  
+  console.log(`Found ${jobsToEnrich.length} jobs to enrich (checked ${checked} from cursor ${cursor})`);
+  
+  let enriched = 0;
+  const enrichedUnmatchedJson = await env.DATA.get('enriched_unmatched') || '[]';
+  const enrichedUnmatched = JSON.parse(enrichedUnmatchedJson);
+  
+  // Enrich each job
+  for (const job of jobsToEnrich) {
+    try {
+      console.log(`Enriching: ${job.title} at ${job.company}`);
+      
+      // Step 1: Scrape full description
+      let fullDescription = null;
+      let lowConfidence = false;
+      try {
+        if (job.url) {
+          fullDescription = await scrapeFullDescription(job.url);
+          if (fullDescription && fullDescription.length > 200) {
+            job.full_description = fullDescription;
+          }
+        }
+      } catch (e) { 
+        console.error('Scrape failed:', job.title, e.message);
+        lowConfidence = true;
+      }
+
+      const descForParsing = (fullDescription && fullDescription.length > (job.description || '').length) 
+        ? fullDescription 
+        : job.description || '';
+
+      if (!fullDescription && (!job.description || job.description.length < 100)) {
+        lowConfidence = true;
+      }
+
+      // Step 2: Parse structured requirements
+      let sr = null;
+      try {
+        if (descForParsing.length > 30) {
+          sr = await parseStructuredRequirements(env, job.title, job.company, descForParsing);
+          if (sr && lowConfidence) {
+            sr.low_confidence = true;
+          }
+        }
+      } catch (e) { 
+        console.error('Parse failed:', job.title, e.message); 
+        lowConfidence = true;
+      }
+
+      // Step 3: Generate embedding
+      let embedding = null;
+      try {
+        const embText = sr
+          ? buildNormalizedEmbeddingText('job', sr)
+          : `Job Title: ${job.title}. Job Title: ${job.title}. Company: ${job.company}. Location: ${job.location}. Industry: ${job.category}. ${descForParsing.substring(0, 400)}`;
+        embedding = await getEmbedding(env, embText);
+      } catch (e) { 
+        console.error('Embed failed:', job.title, e.message); 
+      }
+
+      // Step 4: Update job
+      job.needs_enrichment = false;
+      job.low_confidence = lowConfidence;
+      if (sr) job.structured_requirements = JSON.stringify(sr);
+      if (embedding) job.embedding = JSON.stringify(embedding);
+      
+      await env.DATA.put(`job:${job.id}`, JSON.stringify(job));
+      enriched++;
+      
+      // Add to unmatched list for later matching
+      if (embedding) {
+        enrichedUnmatched.push(job.id);
+      }
+      
+    } catch (e) {
+      console.error(`Failed to enrich job ${job.title}:`, e.message);
+      // Mark as processed even if failed to avoid infinite retry
+      job.needs_enrichment = false;
+      job.enrichment_error = e.message;
+      await env.DATA.put(`job:${job.id}`, JSON.stringify(job));
+    }
+  }
+  
+  // Update enriched unmatched list
+  if (enrichedUnmatched.length > 0) {
+    await env.DATA.put('enriched_unmatched', JSON.stringify(enrichedUnmatched));
+  }
+  
+  // Count remaining jobs that need enrichment
+  let remaining = 0;
+  for (let i = newCursor; i < jobsIndex.length; i++) {
+    const jobId = jobsIndex[i];
+    const jobJson = await env.DATA.get(`job:${jobId}`);
+    if (jobJson) {
+      const job = JSON.parse(jobJson);
+      if (job.needs_enrichment === true) remaining++;
+    }
+    // Only check next 20 to avoid timeout
+    if (i - newCursor > 20) break;
+  }
+  
+  console.log(`Enriched ${enriched} jobs, ${remaining} remaining, cursor now ${newCursor}`);
+  
+  return { enriched, remaining, cursor: newCursor };
+}
+
+async function stageMatch(env) {
+  console.log('Running match stage...');
+  
+  // Get list of enriched but unmatched jobs
+  const enrichedUnmatchedJson = await env.DATA.get('enriched_unmatched') || '[]';
+  const enrichedUnmatched = JSON.parse(enrichedUnmatchedJson);
+  
+  if (enrichedUnmatched.length === 0) {
+    console.log('No enriched unmatched jobs to process');
+    return { matched_jobs: 0, total_matches: 0 };
+  }
+  
+  console.log(`Matching ${enrichedUnmatched.length} jobs against all users`);
+  
+  // Run matching logic for the new jobs
+  const matchResults = await matchJobsAgainstAllUsers(env, enrichedUnmatched);
+  
+  // Clear the enriched unmatched list
+  await env.DATA.put('enriched_unmatched', JSON.stringify([]));
+  
+  // Update last match time
+  await env.DATA.put('last_match_time', new Date().toISOString());
+  
+  console.log(`Matching complete: ${matchResults.total_matches} total matches`);
+  
+  return { matched_jobs: enrichedUnmatched.length, total_matches: matchResults.total_matches };
+}
+
+// Helper functions for pipeline
+async function countUnenrichedJobs(env) {
+  const jobsIndexJson = await env.DATA.get('jobs_index') || '[]';
+  const jobsIndex = JSON.parse(jobsIndexJson);
+  
+  let count = 0;
+  for (let i = 0; i < Math.min(jobsIndex.length, 100); i++) { // Check first 100 to avoid timeout
+    const jobId = jobsIndex[i];
+    const jobJson = await env.DATA.get(`job:${jobId}`);
+    if (jobJson) {
+      const job = JSON.parse(jobJson);
+      if (job.needs_enrichment === true) count++;
+    }
+  }
+  
+  return count;
+}
+
+async function getEnrichedUnmatchedJobs(env) {
+  const enrichedUnmatchedJson = await env.DATA.get('enriched_unmatched') || '[]';
+  return JSON.parse(enrichedUnmatchedJson);
 }
 
 // ── Email Alerts ─────────────────────────────────────────────────────────────
@@ -701,6 +1126,10 @@ async function route(url, request, env, cors) {
 
   // Admin: wipe all jobs (start fresh)
   if (path === '/api/admin/wipe-jobs' && method === 'POST') return handleWipeJobs(url, env, cors);
+
+  // Pipeline endpoints
+  if (path === '/api/pipeline/status' && method === 'GET') return handlePipelineStatus(url, env, cors);
+  if (path === '/api/admin/trigger-pipeline' && method === 'POST') return handleTriggerPipeline(url, env, cors);
 
   // Admin panel endpoints (PIN auth)
   if (path === '/api/admin/dashboard' && method === 'GET') return handleAdminDashboard(url, env, cors);
@@ -3656,4 +4085,78 @@ async function handleReembedAll(url, env, cors) {
     failed,
     missing
   }, { headers: cors });
+}
+
+async function handlePipelineStatus(url, env, cors) {
+  const pin = url.searchParams.get('pin');
+  if (pin !== '7714') return Response.json({ ok: false, error: 'Invalid PIN' }, { status: 403, headers: cors });
+
+  // Get pipeline state
+  const stateJson = await env.DATA.get('pipeline_state') || '{}';
+  const state = JSON.parse(stateJson);
+  
+  // Get job statistics
+  const jobsIndexJson = await env.DATA.get('jobs_index') || '[]';
+  const jobsIndex = JSON.parse(jobsIndexJson);
+  
+  let enrichedCount = 0;
+  let unenrichedCount = 0;
+  
+  // Sample first 50 jobs to get rough statistics (avoid timeout)
+  const sampleSize = Math.min(50, jobsIndex.length);
+  for (let i = 0; i < sampleSize; i++) {
+    const jobId = jobsIndex[i];
+    const jobJson = await env.DATA.get(`job:${jobId}`);
+    if (jobJson) {
+      const job = JSON.parse(jobJson);
+      if (job.needs_enrichment === true || (!job.embedding && !job.structured_requirements)) {
+        unenrichedCount++;
+      } else {
+        enrichedCount++;
+      }
+    }
+  }
+  
+  // Scale up estimates
+  const ratio = jobsIndex.length / sampleSize;
+  enrichedCount = Math.round(enrichedCount * ratio);
+  unenrichedCount = Math.round(unenrichedCount * ratio);
+  
+  // Get user match counts
+  const usersIndexJson = await env.DATA.get('users_index') || '[]';
+  const userIds = JSON.parse(usersIndexJson);
+  const userStats = {};
+  
+  for (const userId of userIds) {
+    const matchesJson = await env.DATA.get(`user_matches:${userId}`) || '[]';
+    userStats[userId] = JSON.parse(matchesJson).length;
+  }
+  
+  // Get enriched unmatched count
+  const enrichedUnmatchedJson = await env.DATA.get('enriched_unmatched') || '[]';
+  const enrichedUnmatched = JSON.parse(enrichedUnmatchedJson);
+  
+  return Response.json({
+    ok: true,
+    pipeline_state: state,
+    stats: {
+      total_jobs: jobsIndex.length,
+      enriched_count: enrichedCount,
+      unenriched_count: unenrichedCount,
+      enriched_unmatched_count: enrichedUnmatched.length,
+      user_match_counts: userStats
+    }
+  }, { headers: cors });
+}
+
+async function handleTriggerPipeline(url, env, cors) {
+  const pin = url.searchParams.get('pin');
+  if (pin !== '7714') return Response.json({ ok: false, error: 'Invalid PIN' }, { status: 403, headers: cors });
+
+  try {
+    const result = await pipelineDispatcher(env);
+    return Response.json({ ok: true, result }, { headers: cors });
+  } catch (e) {
+    return Response.json({ ok: false, error: e.message }, { status: 500, headers: cors });
+  }
 }

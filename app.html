@@ -402,6 +402,8 @@
         </div>
         <!-- Find Jobs Button -->
         <button class="btn" id="findJobsBtn" onclick="triggerJobSync()" style="width:100%;margin-bottom:20px;padding:14px;font-size:1rem">Refresh Matches</button>
+        <!-- Pipeline Status -->
+        <div id="pipelineStatus" style="margin-bottom:16px;font-size:0.85rem;color:var(--text-muted);text-align:center;">Loading pipeline status...</div>
         <!-- Job List -->
         <div id="matchesContent"><div class="loading-overlay"><div class="spinner"></div> Loading matches...</div></div>
       </div>
@@ -650,6 +652,7 @@
       loadMatches();
       loadLocations();
       checkSetupBanner();
+      loadPipelineStatus();
     }
 
     // ── Navigation ──
@@ -1143,24 +1146,54 @@
     async function triggerJobSync() {
       const btn = document.getElementById('findJobsBtn');
       btn.disabled = true;
-      btn.textContent = 'Matching jobs...';
+      btn.textContent = 'Refreshing...';
       try {
-        const userId = currentUser?.id;
-        // Quick recompute in batches of 50 (fast — no external calls)
-        let offset = 0;
-        while (true) {
-          btn.textContent = `Matching jobs... (${offset})`;
-          const rc = await fetch(`${API}/admin/recompute-matches?pin=7714&sync=true&userId=${userId}&offset=${offset}&limit=50`, { method: 'POST' });
-          const rd = await rc.json();
-          if (!rd.ok) break;
-          if (!rd.next_offset) break;
-          offset = rd.next_offset;
-        }
         await loadMatches();
-        toast('Matches updated!');
-      } catch(e) { toast('Match failed: ' + e.message, 'error'); }
+        toast('Matches refreshed!');
+      } catch(e) { toast('Refresh failed: ' + e.message, 'error'); }
       btn.disabled = false;
       btn.textContent = 'Refresh Matches';
+    }
+
+    async function loadPipelineStatus() {
+      try {
+        const res = await fetch(`${API}/pipeline/status?pin=7714`);
+        const data = await res.json();
+        if (data.ok) {
+          const state = data.pipeline_state;
+          const stats = data.stats;
+          const statusEl = document.getElementById('pipelineStatus');
+          
+          let statusText = 'Pipeline status unknown';
+          if (state.last_match) {
+            const lastMatch = new Date(state.last_match);
+            const now = new Date();
+            const diffMs = now - lastMatch;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMins / 60);
+            
+            if (diffMins < 60) {
+              statusText = `Last updated: ${diffMins} minutes ago`;
+            } else if (diffHours < 24) {
+              statusText = `Last updated: ${diffHours} hours ago`;
+            } else {
+              statusText = `Last updated: ${Math.floor(diffHours / 24)} days ago`;
+            }
+          } else {
+            statusText = 'Pipeline not yet initialized';
+          }
+          
+          // Add current stage info
+          if (state.stage && state.stage !== 'idle') {
+            statusText += ` • Currently: ${state.stage}`;
+          }
+          
+          statusEl.textContent = statusText;
+        }
+      } catch (e) {
+        console.error('Failed to load pipeline status:', e);
+        document.getElementById('pipelineStatus').textContent = 'Pipeline status unavailable';
+      }
     }
 
     // ── Saved Jobs ──
