@@ -35626,7 +35626,8 @@ async function stageEnrich(env, cursor) {
   const jobsToEnrich = [];
   let checked = 0;
   let newCursor = cursor;
-  for (let i2 = cursor; i2 < jobsIndex.length && jobsToEnrich.length < 5; i2++) {
+  const scanStart = Math.max(0, jobsIndex.length - 200);
+  for (let i2 = scanStart; i2 < jobsIndex.length && jobsToEnrich.length < 5; i2++) {
     const jobId = jobsIndex[i2];
     const jobJson = await env.DATA.get(`job:${jobId}`);
     if (!jobJson) continue;
@@ -35731,7 +35732,7 @@ async function countUnenrichedJobs(env) {
   const jobsIndexJson = await env.DATA.get("jobs_index") || "[]";
   const jobsIndex = JSON.parse(jobsIndexJson);
   let count = 0;
-  for (let i2 = 0; i2 < Math.min(jobsIndex.length, 100); i2++) {
+  for (let i2 = Math.max(0, jobsIndex.length - 200); i2 < jobsIndex.length; i2++) {
     const jobId = jobsIndex[i2];
     const jobJson = await env.DATA.get(`job:${jobId}`);
     if (jobJson) {

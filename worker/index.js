@@ -571,8 +571,9 @@ async function stageEnrich(env, cursor) {
   let checked = 0;
   let newCursor = cursor;
   
-  // Scan from cursor to find up to 5 jobs that need enrichment
-  for (let i = cursor; i < jobsIndex.length && jobsToEnrich.length < 5; i++) {
+  // Scan from END of index (new unenriched jobs are appended) to find up to 5
+  const scanStart = Math.max(0, jobsIndex.length - 200); // Only check last 200
+  for (let i = scanStart; i < jobsIndex.length && jobsToEnrich.length < 5; i++) {
     const jobId = jobsIndex[i];
     const jobJson = await env.DATA.get(`job:${jobId}`);
     if (!jobJson) continue;
@@ -725,7 +726,8 @@ async function countUnenrichedJobs(env) {
   const jobsIndex = JSON.parse(jobsIndexJson);
   
   let count = 0;
-  for (let i = 0; i < Math.min(jobsIndex.length, 100); i++) { // Check first 100 to avoid timeout
+  // Check from the END (new jobs are appended), scan last 200
+  for (let i = Math.max(0, jobsIndex.length - 200); i < jobsIndex.length; i++) {
     const jobId = jobsIndex[i];
     const jobJson = await env.DATA.get(`job:${jobId}`);
     if (jobJson) {
