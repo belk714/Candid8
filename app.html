@@ -902,16 +902,41 @@
     }
 
     // ── Matches ──
-    async function loadMatches() {
+    let currentMatchOffset = 0;
+    let totalMatchCount = 0;
+    let isLoadingMatches = false;
+
+    async function loadMatches(loadMore = false) {
       const el = document.getElementById('matchesContent');
+      const offset = loadMore ? currentMatchOffset : 0;
+      
+      if (!loadMore) {
+        currentMatchOffset = 0;
+        el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Loading matches...</div>';
+      }
+      
+      if (isLoadingMatches) return;
+      isLoadingMatches = true;
+      
       try {
-        const res = await fetch(`${API}/matches?_t=${Date.now()}`, { headers: authHeaders(), cache: 'no-store' });
+        const res = await fetch(`${API}/matches?limit=50&offset=${offset}&_t=${Date.now()}`, { headers: authHeaders(), cache: 'no-store' });
         const data = await res.json();
-        if (!data.ok || !data.matches?.length) {
-          el.innerHTML = '<div class="empty-state"><h3>No matches yet</h3><p>Upload your resume and we\'ll match you with jobs.</p></div>';
+        
+        if (!data.ok) {
+          if (!loadMore) el.innerHTML = '<div class="empty-state"><h3>Failed to load matches</h3><p>Please try refreshing the page.</p></div>';
           return;
         }
-        el.innerHTML = data.matches.map((m, i) => {
+        
+        totalMatchCount = data.total_count || 0;
+        
+        if (!data.matches?.length) {
+          if (!loadMore) {
+            el.innerHTML = '<div class="empty-state"><h3>No matches yet</h3><p>Upload your resume and we\'ll match you with jobs.</p></div>';
+          }
+          return;
+        }
+        
+        const matchesHtml = data.matches.map((m, i) => {
           const b = m.breakdown || {};
           const isDetailed = b.detailed;
           const displayScore = m.composite_score ?? m.score;
@@ -983,8 +1008,60 @@
               </div>
             </div>`;
         }).join('');
+        
+        if (loadMore) {
+          // Append new matches to existing content, but remove the load more button first
+          const existingLoadMore = el.querySelector('.load-more-container');
+          if (existingLoadMore) existingLoadMore.remove();
+          
+          el.insertAdjacentHTML('beforeend', matchesHtml);
+        } else {
+          // Replace content with new matches
+          el.innerHTML = matchesHtml;
+        }
+        
+        currentMatchOffset = offset + data.matches.length;
+        
+        // Add "Load More" button if there are more matches
+        if (data.has_more) {
+          const loadMoreHtml = `
+            <div class="load-more-container" style="text-align: center; margin: 24px 0;">
+              <button class="btn btn-secondary" id="loadMoreBtn" onclick="loadMoreMatches()" style="width: auto; padding: 12px 24px;">
+                Load More (${totalMatchCount - currentMatchOffset} remaining)
+              </button>
+            </div>
+          `;
+          el.insertAdjacentHTML('beforeend', loadMoreHtml);
+        }
+        
       } catch (ex) {
-        el.innerHTML = '<div class="empty-state"><p>Failed to load matches.</p></div>';
+        if (!loadMore) {
+          el.innerHTML = '<div class="empty-state"><p>Failed to load matches.</p></div>';
+        } else {
+          // Show error for load more
+          const loadMoreBtn = document.getElementById('loadMoreBtn');
+          if (loadMoreBtn) {
+            loadMoreBtn.textContent = 'Failed to load more - Try again';
+            loadMoreBtn.style.color = 'var(--red)';
+          }
+        }
+      } finally {
+        isLoadingMatches = false;
+      }
+    }
+    
+    async function loadMoreMatches() {
+      const loadMoreBtn = document.getElementById('loadMoreBtn');
+      if (loadMoreBtn) {
+        loadMoreBtn.textContent = 'Loading...';
+        loadMoreBtn.disabled = true;
+      }
+      
+      await loadMatches(true);
+      
+      // Re-enable button in case of error
+      if (loadMoreBtn && !loadMoreBtn.parentElement.querySelector('.load-more-container')) {
+        loadMoreBtn.disabled = false;
       }
     }
 

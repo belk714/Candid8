@@ -35647,60 +35647,42 @@ async function stageEnrich(env, cursor) {
       console.log(`Enriching: ${job.title} at ${job.company}`);
       let fullDescription = null;
       let lowConfidence = false;
-      let scrapeFailed = false;
       try {
         if (job.url) {
           fullDescription = await scrapeFullDescription(job.url);
-          if (fullDescription && fullDescription.length > 100) {
-            const lowerDesc = fullDescription.toLowerCase();
-            const isGeoBlock = lowerDesc.includes("befinden sie sich") || lowerDesc.includes("richtige land") || lowerDesc.includes("fortfahren");
-            const isAccessDenied = lowerDesc.includes("access denied") || lowerDesc.includes("suspicious behavior") || lowerDesc.includes("blocked") || lowerDesc.includes("not authorized");
-            if (isGeoBlock || isAccessDenied || fullDescription.length < 100) {
-              console.log(`Scrape failure detected for ${job.title}: geo-block=${isGeoBlock}, access-denied=${isAccessDenied}, short=${fullDescription.length < 100}`);
-              scrapeFailed = true;
-              fullDescription = null;
-            } else if (fullDescription.length > 200) {
-              job.full_description = fullDescription;
-            }
-          } else {
-            scrapeFailed = true;
+          if (fullDescription && fullDescription.length > 200) {
+            job.full_description = fullDescription;
           }
         }
       } catch (e2) {
         console.error("Scrape failed:", job.title, e2.message);
         lowConfidence = true;
-        scrapeFailed = true;
       }
       const descForParsing = fullDescription && fullDescription.length > (job.description || "").length ? fullDescription : job.description || "";
       if (!fullDescription && (!job.description || job.description.length < 100)) {
         lowConfidence = true;
       }
       let sr2 = null;
-      if (!scrapeFailed) {
-        try {
-          if (descForParsing.length > 30) {
-            sr2 = await parseStructuredRequirements(env, job.title, job.company, descForParsing);
-            if (sr2 && lowConfidence) {
-              sr2.low_confidence = true;
-            }
+      try {
+        if (descForParsing.length > 30) {
+          sr2 = await parseStructuredRequirements(env, job.title, job.company, descForParsing);
+          if (sr2 && lowConfidence) {
+            sr2.low_confidence = true;
           }
-        } catch (e2) {
-          console.error("Parse failed:", job.title, e2.message);
-          lowConfidence = true;
         }
+      } catch (e2) {
+        console.error("Parse failed:", job.title, e2.message);
+        lowConfidence = true;
       }
       let embedding = null;
-      if (!scrapeFailed) {
-        try {
-          const embText = sr2 ? buildNormalizedEmbeddingText("job", sr2) : `Job Title: ${job.title}. Job Title: ${job.title}. Company: ${job.company}. Location: ${job.location}. Industry: ${job.category}. ${descForParsing.substring(0, 400)}`;
-          embedding = await getEmbedding(env, embText);
-        } catch (e2) {
-          console.error("Embed failed:", job.title, e2.message);
-        }
+      try {
+        const embText = sr2 ? buildNormalizedEmbeddingText("job", sr2) : `Job Title: ${job.title}. Job Title: ${job.title}. Company: ${job.company}. Location: ${job.location}. Industry: ${job.category}. ${descForParsing.substring(0, 400)}`;
+        embedding = await getEmbedding(env, embText);
+      } catch (e2) {
+        console.error("Embed failed:", job.title, e2.message);
       }
       job.needs_enrichment = false;
       job.low_confidence = lowConfidence;
-      job.scrape_failed = scrapeFailed;
       if (sr2) job.structured_requirements = JSON.stringify(sr2);
       if (embedding) job.embedding = JSON.stringify(embedding);
       await env.DATA.put(`job:${job.id}`, JSON.stringify(job));
@@ -35859,18 +35841,11 @@ async function matchJobsAgainstAllUsers(env, newJobIds) {
         } catch (e2) {
           sr2 = null;
         }
-        const senLevels = { "entry": 1, "mid": 2, "senior": 3, "director": 4, "vp": 5, "c-suite": 6 };
-        const uYoe = profile.structured_data?.years_of_experience || 0;
-        const uSen = uYoe >= 20 ? 5 : uYoe >= 15 ? 4 : uYoe >= 8 ? 3 : uYoe >= 3 ? 2 : 1;
         if (sr2 && sr2.seniority_level) {
-          if (Math.abs(uSen - (senLevels[sr2.seniority_level] || 2)) > 1) continue;
-        } else if (!sr2 || !sr2.seniority_level) {
-          const jobTitleLower = (job.title || "").toLowerCase();
-          const juniorKeywords = ["intern", "junior", "associate", "entry", "graduate", "trainee", "apprentice"];
-          const levelKeywords = [" i ", " ii "];
-          const seniorKeywords = [" iii", " iv", " v"];
-          const hasJuniorKeywords = juniorKeywords.some((kw) => jobTitleLower.includes(kw)) || levelKeywords.some((kw) => jobTitleLower.includes(kw)) && !seniorKeywords.some((kw) => jobTitleLower.includes(kw));
-          if (hasJuniorKeywords && uSen >= 3) continue;
+          const senLevels = { "entry": 1, "mid": 2, "senior": 3, "director": 4, "vp": 5, "c-suite": 6 };
+          const uYoe = profile.structured_data?.years_of_experience || 0;
+          const uSen = uYoe >= 20 ? 5 : uYoe >= 15 ? 4 : uYoe >= 8 ? 3 : uYoe >= 3 ? 2 : 1;
+          if (Math.abs(uSen - (senLevels[sr2.seniority_level] || 2)) > 2) continue;
         }
         let breakdown, score;
         if (sr2) {
@@ -35974,7 +35949,6 @@ async function route(url, request, env, cors) {
   if (path === "/api/admin/recompute-matches" && method === "POST") return handleRecomputeMatches(url, env, cors);
   if (path === "/api/admin/scrape-jobs" && method === "POST") return handleScrapeJobs(url, env, cors);
   if (path === "/api/admin/wipe-jobs" && method === "POST") return handleWipeJobs(url, env, cors);
-  if (path === "/api/admin/purge-bad-matches" && method === "POST") return handlePurgeBadMatches(url, env, cors);
   if (path === "/api/pipeline/status" && method === "GET") return handlePipelineStatus(url, env, cors);
   if (path === "/api/admin/trigger-pipeline" && method === "POST") return handleTriggerPipeline(url, env, cors);
   if (path === "/api/admin/dashboard" && method === "GET") return handleAdminDashboard(url, env, cors);
@@ -36021,17 +35995,6 @@ async function route(url, request, env, cors) {
   }
   if (path === "/api/admin/profile" && method === "PATCH") return handleAdminPatchProfile(url, request, env, cors);
   if (path === "/api/admin/invite" && method === "POST") return handleAdminInvite(url, request, env, cors);
-  if (path === "/api/admin/set-password" && method === "POST") {
-    requirePin(url);
-    const userId = url.searchParams.get("user_id");
-    const { password } = await request.json();
-    if (!userId || !password) return Response.json({ ok: false, error: "user_id and password required" }, { status: 400, headers: cors });
-    const user = JSON.parse(await env.DATA.get(`user:${userId}`) || "null");
-    if (!user) return Response.json({ ok: false, error: "User not found" }, { status: 404, headers: cors });
-    user.password_hash = await hashPassword(password);
-    await env.DATA.put(`user:${userId}`, JSON.stringify(user));
-    return Response.json({ ok: true, message: "Password updated" }, { headers: cors });
-  }
   if (path === "/api/admin/clear-index" && method === "POST") {
     requirePin(url);
     await env.DATA.put("jobs_index", JSON.stringify([]));
@@ -36673,13 +36636,8 @@ async function handleGetJobLocations(env, cors) {
 }
 async function handleGetMatches(request, env, cors) {
   const userId = await requireAuth(request, env);
-  const url = new URL(request.url);
-  const limit = parseInt(url.searchParams.get("limit") || "50");
-  const offset = parseInt(url.searchParams.get("offset") || "0");
   const matchesJson = await env.DATA.get(`user_matches:${userId}`) || "[]";
-  const allMatchIds = JSON.parse(matchesJson);
-  const totalCount = allMatchIds.length;
-  const matchIds = allMatchIds.slice(offset, offset + limit);
+  const matchIds = JSON.parse(matchesJson);
   const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
   const matches = [];
   for (const id of matchIds) {
@@ -36712,14 +36670,7 @@ async function handleGetMatches(request, env, cors) {
     });
   }
   matches.sort((a2, b2) => (b2.composite_score ?? b2.score ?? -1) - (a2.composite_score ?? a2.score ?? -1));
-  return Response.json({
-    ok: true,
-    matches,
-    total_count: totalCount,
-    limit,
-    offset,
-    has_more: offset + limit < totalCount
-  }, { headers: cors });
+  return Response.json({ ok: true, matches }, { headers: cors });
 }
 async function handleGetMatchDetail(request, env, cors, jobId) {
   const userId = await requireAuth(request, env);
@@ -36834,14 +36785,7 @@ async function computeMatches(userId, env, profile) {
     }
     if (sr2 && sr2.seniority_level) {
       const jobSenLevel = seniorityLevels[sr2.seniority_level] || 2;
-      if (Math.abs(userSenLevel - jobSenLevel) > 1) continue;
-    } else if (!sr2 || !sr2.seniority_level) {
-      const jobTitleLower = (job.title || "").toLowerCase();
-      const juniorKeywords = ["intern", "junior", "associate", "entry", "graduate", "trainee", "apprentice"];
-      const levelKeywords = [" i ", " ii "];
-      const seniorKeywords = [" iii", " iv", " v"];
-      const hasJuniorKeywords = juniorKeywords.some((kw) => jobTitleLower.includes(kw)) || levelKeywords.some((kw) => jobTitleLower.includes(kw)) && !seniorKeywords.some((kw) => jobTitleLower.includes(kw));
-      if (hasJuniorKeywords && userSenLevel >= 3) continue;
+      if (Math.abs(userSenLevel - jobSenLevel) > 2) continue;
     }
     let breakdown, compositeScore;
     if (sr2) {
@@ -38598,71 +38542,6 @@ async function handleTriggerPipeline(url, env, cors) {
     await env.DATA.put("pipeline_state", JSON.stringify(state));
   }
   return Response.json({ ok: true, message: "Pipeline will run on next cron cycle (every 10 min)", current_stage: state.stage }, { headers: cors });
-}
-async function handlePurgeBadMatches(url, env, cors) {
-  requirePin(url);
-  const batchSize = parseInt(url.searchParams.get("batch") || "50");
-  const targetUser = url.searchParams.get("user") || null;
-  const usersIndexJson = await env.DATA.get("users_index") || "[]";
-  const userIds = targetUser ? [targetUser] : JSON.parse(usersIndexJson);
-  let totalPurged = 0;
-  const purgeReport = [];
-  for (const userId of userIds) {
-    const userMatchesJson = await env.DATA.get(`user_matches:${userId}`) || "[]";
-    const matchIds = JSON.parse(userMatchesJson);
-    const processBatch = matchIds.slice(0, batchSize);
-    const remaining = matchIds.slice(batchSize);
-    const validFromBatch = [];
-    let userPurgedCount = 0;
-    for (const matchId of processBatch) {
-      const match = JSON.parse(await env.DATA.get(`match:${matchId}`) || "null");
-      if (!match) {
-        userPurgedCount++;
-        continue;
-      }
-      const job = JSON.parse(await env.DATA.get(`job:${match.job_id}`) || "null");
-      if (!job) {
-        await env.DATA.delete(`match:${matchId}`);
-        userPurgedCount++;
-        continue;
-      }
-      if (job.scrape_failed === true) {
-        await env.DATA.delete(`match:${matchId}`);
-        userPurgedCount++;
-        continue;
-      }
-      const description = job.full_description || job.description || "";
-      if (description.length > 0) {
-        const lowerDesc = description.toLowerCase();
-        const isGeoBlock = lowerDesc.includes("befinden sie sich") || lowerDesc.includes("richtige land") || lowerDesc.includes("fortfahren");
-        const isAccessDenied = lowerDesc.includes("access denied") || lowerDesc.includes("suspicious behavior") || lowerDesc.includes("blocked") || lowerDesc.includes("not authorized");
-        const isTooShort = description.length < 100;
-        if (isGeoBlock || isAccessDenied || isTooShort) {
-          await env.DATA.delete(`match:${matchId}`);
-          userPurgedCount++;
-          continue;
-        }
-      }
-      validFromBatch.push(matchId);
-    }
-    const newMatchList = [...validFromBatch, ...remaining];
-    await env.DATA.put(`user_matches:${userId}`, JSON.stringify(newMatchList));
-    totalPurged += userPurgedCount;
-    purgeReport.push({
-      user_id: userId,
-      total_matches: matchIds.length,
-      batch_processed: processBatch.length,
-      purged: userPurgedCount,
-      remaining_unprocessed: remaining.length,
-      kept: validFromBatch.length
-    });
-  }
-  return Response.json({
-    ok: true,
-    total_purged: totalPurged,
-    users_affected: purgeReport.length,
-    purge_report: purgeReport
-  }, { headers: cors });
 }
 export {
   index_default as default

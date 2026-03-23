@@ -601,16 +601,36 @@ async function stageEnrich(env, cursor) {
       // Step 1: Scrape full description
       let fullDescription = null;
       let lowConfidence = false;
+      let scrapeFailed = false;
       try {
         if (job.url) {
           fullDescription = await scrapeFullDescription(job.url);
-          if (fullDescription && fullDescription.length > 200) {
-            job.full_description = fullDescription;
+          if (fullDescription && fullDescription.length > 100) {
+            // Check for scrape failures and geo-block pages
+            const lowerDesc = fullDescription.toLowerCase();
+            const isGeoBlock = lowerDesc.includes('befinden sie sich') || 
+                             lowerDesc.includes('richtige land') || 
+                             lowerDesc.includes('fortfahren');
+            const isAccessDenied = lowerDesc.includes('access denied') || 
+                                 lowerDesc.includes('suspicious behavior') ||
+                                 lowerDesc.includes('blocked') ||
+                                 lowerDesc.includes('not authorized');
+            
+            if (isGeoBlock || isAccessDenied || fullDescription.length < 100) {
+              console.log(`Scrape failure detected for ${job.title}: geo-block=${isGeoBlock}, access-denied=${isAccessDenied}, short=${fullDescription.length < 100}`);
+              scrapeFailed = true;
+              fullDescription = null;
+            } else if (fullDescription.length > 200) {
+              job.full_description = fullDescription;
+            }
+          } else {
+            scrapeFailed = true;
           }
         }
       } catch (e) { 
         console.error('Scrape failed:', job.title, e.message);
         lowConfidence = true;
+        scrapeFailed = true;
       }
 
       const descForParsing = (fullDescription && fullDescription.length > (job.description || '').length) 
@@ -621,34 +641,39 @@ async function stageEnrich(env, cursor) {
         lowConfidence = true;
       }
 
-      // Step 2: Parse structured requirements
+      // Step 2: Parse structured requirements (skip if scrape failed)
       let sr = null;
-      try {
-        if (descForParsing.length > 30) {
-          sr = await parseStructuredRequirements(env, job.title, job.company, descForParsing);
-          if (sr && lowConfidence) {
-            sr.low_confidence = true;
+      if (!scrapeFailed) {
+        try {
+          if (descForParsing.length > 30) {
+            sr = await parseStructuredRequirements(env, job.title, job.company, descForParsing);
+            if (sr && lowConfidence) {
+              sr.low_confidence = true;
+            }
           }
+        } catch (e) { 
+          console.error('Parse failed:', job.title, e.message); 
+          lowConfidence = true;
         }
-      } catch (e) { 
-        console.error('Parse failed:', job.title, e.message); 
-        lowConfidence = true;
       }
 
-      // Step 3: Generate embedding
+      // Step 3: Generate embedding (skip if scrape failed)
       let embedding = null;
-      try {
-        const embText = sr
-          ? buildNormalizedEmbeddingText('job', sr)
-          : `Job Title: ${job.title}. Job Title: ${job.title}. Company: ${job.company}. Location: ${job.location}. Industry: ${job.category}. ${descForParsing.substring(0, 400)}`;
-        embedding = await getEmbedding(env, embText);
-      } catch (e) { 
-        console.error('Embed failed:', job.title, e.message); 
+      if (!scrapeFailed) {
+        try {
+          const embText = sr
+            ? buildNormalizedEmbeddingText('job', sr)
+            : `Job Title: ${job.title}. Job Title: ${job.title}. Company: ${job.company}. Location: ${job.location}. Industry: ${job.category}. ${descForParsing.substring(0, 400)}`;
+          embedding = await getEmbedding(env, embText);
+        } catch (e) { 
+          console.error('Embed failed:', job.title, e.message); 
+        }
       }
 
       // Step 4: Update job
       job.needs_enrichment = false;
       job.low_confidence = lowConfidence;
+      job.scrape_failed = scrapeFailed;
       if (sr) job.structured_requirements = JSON.stringify(sr);
       if (embedding) job.embedding = JSON.stringify(embedding);
       
@@ -866,18 +891,32 @@ async function matchJobsAgainstAllUsers(env, newJobIds) {
         if (settings.salary_min && job.salary_max && typeof job.salary_max === "number" && job.salary_max > 0 && job.salary_max < settings.salary_min) continue;
         if (settings.salary_max && settings.salary_max > 0 && job.salary_min && typeof job.salary_min === "number" && job.salary_min > 0 && job.salary_min > settings.salary_max) continue;
 
-        // Seniority hard filter
+        // Seniority hard filter (stricter ±1 level)
         const skillEmbeddings = profile.skill_embeddings || {};
         let sr = null;
         try {
           sr = job.structured_requirements ? (typeof job.structured_requirements === 'string' ? JSON.parse(job.structured_requirements) : job.structured_requirements) : null;
         } catch (e) { sr = null; }
 
+        const senLevels = { 'entry': 1, 'mid': 2, 'senior': 3, 'director': 4, 'vp': 5, 'c-suite': 6 };
+        const uYoe = profile.structured_data?.years_of_experience || 0;
+        const uSen = uYoe >= 20 ? 5 : uYoe >= 15 ? 4 : uYoe >= 8 ? 3 : uYoe >= 3 ? 2 : 1;
+        
         if (sr && sr.seniority_level) {
-          const senLevels = { 'entry': 1, 'mid': 2, 'senior': 3, 'director': 4, 'vp': 5, 'c-suite': 6 };
-          const uYoe = profile.structured_data?.years_of_experience || 0;
-          const uSen = uYoe >= 20 ? 5 : uYoe >= 15 ? 4 : uYoe >= 8 ? 3 : uYoe >= 3 ? 2 : 1;
-          if (Math.abs(uSen - (senLevels[sr.seniority_level] || 2)) > 2) continue;
+          if (Math.abs(uSen - (senLevels[sr.seniority_level] || 2)) > 1) continue;
+        } else if (!sr || !sr.seniority_level) {
+          // If no seniority detected, check if job title contains junior/entry keywords
+          const jobTitleLower = (job.title || '').toLowerCase();
+          const juniorKeywords = ['intern', 'junior', 'associate', 'entry', 'graduate', 'trainee', 'apprentice'];
+          const levelKeywords = [' i ', ' ii '];
+          const seniorKeywords = [' iii', ' iv', ' v'];
+          
+          const hasJuniorKeywords = juniorKeywords.some(kw => jobTitleLower.includes(kw)) || 
+                                   levelKeywords.some(kw => jobTitleLower.includes(kw)) &&
+                                   !seniorKeywords.some(kw => jobTitleLower.includes(kw));
+          
+          // Filter out junior roles for users with senior level (3+)
+          if (hasJuniorKeywords && uSen >= 3) continue;
         }
 
         // THE COMPOSITE SCORE comes from skill-level embedding matching ONLY
@@ -1153,6 +1192,9 @@ async function route(url, request, env, cors) {
   // Admin: wipe all jobs (start fresh)
   if (path === '/api/admin/wipe-jobs' && method === 'POST') return handleWipeJobs(url, env, cors);
 
+  // Admin: purge bad matches
+  if (path === '/api/admin/purge-bad-matches' && method === 'POST') return handlePurgeBadMatches(url, env, cors);
+
   // Pipeline endpoints
   if (path === '/api/pipeline/status' && method === 'GET') return handlePipelineStatus(url, env, cors);
   if (path === '/api/admin/trigger-pipeline' && method === 'POST') return handleTriggerPipeline(url, env, cors);
@@ -1202,6 +1244,17 @@ async function route(url, request, env, cors) {
   }
   if (path === '/api/admin/profile' && method === 'PATCH') return handleAdminPatchProfile(url, request, env, cors);
   if (path === '/api/admin/invite' && method === 'POST') return handleAdminInvite(url, request, env, cors);
+  if (path === '/api/admin/set-password' && method === 'POST') {
+    requirePin(url);
+    const userId = url.searchParams.get('user_id');
+    const { password } = await request.json();
+    if (!userId || !password) return Response.json({ ok: false, error: 'user_id and password required' }, { status: 400, headers: cors });
+    const user = JSON.parse(await env.DATA.get(`user:${userId}`) || 'null');
+    if (!user) return Response.json({ ok: false, error: 'User not found' }, { status: 404, headers: cors });
+    user.password_hash = await hashPassword(password);
+    await env.DATA.put(`user:${userId}`, JSON.stringify(user));
+    return Response.json({ ok: true, message: 'Password updated' }, { headers: cors });
+  }
   if (path === '/api/admin/clear-index' && method === 'POST') {
     requirePin(url);
     await env.DATA.put('jobs_index', JSON.stringify([]));
@@ -1973,8 +2026,16 @@ async function handleGetJobLocations(env, cors) {
 
 async function handleGetMatches(request, env, cors) {
   const userId = await requireAuth(request, env);
+  const url = new URL(request.url);
+  const limit = parseInt(url.searchParams.get('limit') || '50');
+  const offset = parseInt(url.searchParams.get('offset') || '0');
+  
   const matchesJson = await env.DATA.get(`user_matches:${userId}`) || '[]';
-  const matchIds = JSON.parse(matchesJson);
+  const allMatchIds = JSON.parse(matchesJson);
+  const totalCount = allMatchIds.length;
+  
+  // Apply pagination to match IDs
+  const matchIds = allMatchIds.slice(offset, offset + limit);
   const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || '{}');
   
   const matches = [];
@@ -2018,7 +2079,14 @@ async function handleGetMatches(request, env, cors) {
   
   // Sort by composite score
   matches.sort((a, b) => (b.composite_score ?? b.score ?? -1) - (a.composite_score ?? a.score ?? -1));
-  return Response.json({ ok: true, matches }, { headers: cors });
+  return Response.json({ 
+    ok: true, 
+    matches, 
+    total_count: totalCount,
+    limit,
+    offset,
+    has_more: offset + limit < totalCount
+  }, { headers: cors });
 }
 
 async function handleGetMatchDetail(request, env, cors, jobId) {
@@ -2170,10 +2238,23 @@ async function computeMatches(userId, env, profile) {
       sr = job.structured_requirements ? (typeof job.structured_requirements === 'string' ? JSON.parse(job.structured_requirements) : job.structured_requirements) : null;
     } catch (e) { sr = null; }
 
-    // Hard filter: Seniority ±2 levels
+    // Hard filter: Seniority ±1 level (stricter)
     if (sr && sr.seniority_level) {
       const jobSenLevel = seniorityLevels[sr.seniority_level] || 2;
-      if (Math.abs(userSenLevel - jobSenLevel) > 2) continue;
+      if (Math.abs(userSenLevel - jobSenLevel) > 1) continue;
+    } else if (!sr || !sr.seniority_level) {
+      // If no seniority detected, check if job title contains junior/entry keywords
+      const jobTitleLower = (job.title || '').toLowerCase();
+      const juniorKeywords = ['intern', 'junior', 'associate', 'entry', 'graduate', 'trainee', 'apprentice'];
+      const levelKeywords = [' i ', ' ii '];
+      const seniorKeywords = [' iii', ' iv', ' v'];
+      
+      const hasJuniorKeywords = juniorKeywords.some(kw => jobTitleLower.includes(kw)) || 
+                               levelKeywords.some(kw => jobTitleLower.includes(kw)) &&
+                               !seniorKeywords.some(kw => jobTitleLower.includes(kw));
+      
+      // Filter out junior roles for users with senior level (3+)
+      if (hasJuniorKeywords && userSenLevel >= 3) continue;
     }
 
     let breakdown, compositeScore;
@@ -4203,4 +4284,97 @@ async function handleTriggerPipeline(url, env, cors) {
     await env.DATA.put('pipeline_state', JSON.stringify(state));
   }
   return Response.json({ ok: true, message: 'Pipeline will run on next cron cycle (every 10 min)', current_stage: state.stage }, { headers: cors });
+}
+
+// ── Admin: Purge Bad Matches ────────────────────────────────────────────────
+
+async function handlePurgeBadMatches(url, env, cors) {
+  requirePin(url);
+  
+  const batchSize = parseInt(url.searchParams.get('batch') || '50');
+  const targetUser = url.searchParams.get('user') || null;
+  
+  // Get all users
+  const usersIndexJson = await env.DATA.get('users_index') || '[]';
+  const userIds = targetUser ? [targetUser] : JSON.parse(usersIndexJson);
+  
+  let totalPurged = 0;
+  const purgeReport = [];
+  
+  for (const userId of userIds) {
+    const userMatchesJson = await env.DATA.get(`user_matches:${userId}`) || '[]';
+    const matchIds = JSON.parse(userMatchesJson);
+    
+    // Process in batch to avoid timeout
+    const processBatch = matchIds.slice(0, batchSize);
+    const remaining = matchIds.slice(batchSize);
+    
+    const validFromBatch = [];
+    let userPurgedCount = 0;
+    
+    for (const matchId of processBatch) {
+      const match = JSON.parse(await env.DATA.get(`match:${matchId}`) || 'null');
+      if (!match) {
+        userPurgedCount++;
+        continue;
+      }
+      
+      // Get the underlying job
+      const job = JSON.parse(await env.DATA.get(`job:${match.job_id}`) || 'null');
+      if (!job) {
+        await env.DATA.delete(`match:${matchId}`);
+        userPurgedCount++;
+        continue;
+      }
+      
+      // Check if job has scrape_failed flag
+      if (job.scrape_failed === true) {
+        await env.DATA.delete(`match:${matchId}`);
+        userPurgedCount++;
+        continue;
+      }
+      
+      // Check for garbage description
+      const description = job.full_description || job.description || '';
+      if (description.length > 0) {
+        const lowerDesc = description.toLowerCase();
+        const isGeoBlock = lowerDesc.includes('befinden sie sich') || 
+                         lowerDesc.includes('richtige land') || 
+                         lowerDesc.includes('fortfahren');
+        const isAccessDenied = lowerDesc.includes('access denied') || 
+                             lowerDesc.includes('suspicious behavior') ||
+                             lowerDesc.includes('blocked') ||
+                             lowerDesc.includes('not authorized');
+        const isTooShort = description.length < 100;
+        
+        if (isGeoBlock || isAccessDenied || isTooShort) {
+          await env.DATA.delete(`match:${matchId}`);
+          userPurgedCount++;
+          continue;
+        }
+      }
+      
+      validFromBatch.push(matchId);
+    }
+    
+    // Combine valid matches from this batch + unprocessed remaining
+    const newMatchList = [...validFromBatch, ...remaining];
+    await env.DATA.put(`user_matches:${userId}`, JSON.stringify(newMatchList));
+    totalPurged += userPurgedCount;
+    purgeReport.push({
+      user_id: userId,
+      total_matches: matchIds.length,
+      batch_processed: processBatch.length,
+      purged: userPurgedCount,
+      remaining_unprocessed: remaining.length,
+      kept: validFromBatch.length
+    });
+  }
+  
+  return Response.json({
+    ok: true,
+    total_purged: totalPurged,
+    users_affected: purgeReport.length,
+    purge_report: purgeReport
+  }, { headers: cors });
 }
