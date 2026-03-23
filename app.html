@@ -505,12 +505,15 @@
       try {
         const res = await fetch(`${API}/settings`, { headers: authHeaders() });
         if (res.status === 401 || res.status === 500) {
-          // Token expired — clear and show login
+          // Token expired — clear and show login (no reload to avoid loops)
           localStorage.removeItem('candid8_token');
           localStorage.removeItem('candid8_user');
           token = null;
           currentUser = null;
-          location.reload();
+          document.getElementById('authScreen').style.display = '';
+          document.getElementById('appDashboard').classList.remove('active');
+          document.getElementById('onboarding').classList.remove('active');
+          showAuthTab('login');
           return;
         }
         const data = await res.json();
