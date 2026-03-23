@@ -905,7 +905,7 @@
           const displayScore = m.composite_score ?? m.score;
           const hasScore = displayScore != null;
           const scoreLabel = hasScore ? `${displayScore}%` : '';
-          const matchedSkills = m.matched_skills || b.matched_skills || [];
+          const matchedSkills = [...new Set(m.matched_skills || b.matched_skills || [])];
           const missingDetail = m.missing_skills_detail || b.missing_skills_detail || [];
           const missingSimple = m.missing_skills || b.missing_skills || b.skills_detail?.required_skills_missing || [];
           const whyJob = m.why_this_job || b.why_this_job || '';
@@ -918,7 +918,7 @@
                   <h3>${m.job.title}</h3>
                   <div class="company">${m.job.company}</div>
                   <div class="location">${m.job.location}</div>
-                  ${m.job.salary_min ? `<div class="salary">${formatSalary(m.job.salary_min)} – ${formatSalary(m.job.salary_max)}</div>` : ''}
+                  ${m.job.salary_min ? `<div class="salary">${m.job.salary_min === m.job.salary_max ? formatSalary(m.job.salary_min) : formatSalary(m.job.salary_min) + ' – ' + formatSalary(m.job.salary_max)}</div>` : ''}
                 </div>
                 ${hasScore
                   ? `<div class="score-badge ${scoreClass(displayScore)}" id="badge-${m.job.id}" title="Skills-first fit: ${displayScore}%">${scoreLabel}</div>`
@@ -1164,31 +1164,35 @@
           const stats = data.stats;
           const statusEl = document.getElementById('pipelineStatus');
           
-          let statusText = 'Pipeline status unknown';
-          if (state.last_match) {
-            const lastMatch = new Date(state.last_match);
-            const now = new Date();
-            const diffMs = now - lastMatch;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMins / 60);
-            
-            if (diffMins < 60) {
-              statusText = `Last updated: ${diffMins} minutes ago`;
-            } else if (diffHours < 24) {
-              statusText = `Last updated: ${diffHours} hours ago`;
+          const parts = [];
+          
+          // Last updated time
+          const lastTime = state.last_match || state.last_enrich || state.last_sync;
+          if (lastTime) {
+            const diff = Math.floor((Date.now() - new Date(lastTime).getTime()) / 60000);
+            if (diff < 1) parts.push('Updated just now');
+            else if (diff < 60) parts.push(`Updated ${diff}m ago`);
+            else if (diff < 1440) parts.push(`Updated ${Math.floor(diff/60)}h ago`);
+            else parts.push(`Updated ${Math.floor(diff/1440)}d ago`);
+          }
+          
+          // Job stats
+          const stats = data.stats || {};
+          if (stats.total_jobs) {
+            const unenriched = stats.unenriched_count || 0;
+            if (unenriched > 0) {
+              parts.push(`${stats.total_jobs} jobs (${unenriched} processing)`);
             } else {
-              statusText = `Last updated: ${Math.floor(diffHours / 24)} days ago`;
+              parts.push(`${stats.total_jobs} jobs indexed`);
             }
-          } else {
-            statusText = 'Pipeline not yet initialized';
           }
           
-          // Add current stage info
-          if (state.stage && state.stage !== 'idle') {
-            statusText += ` • Currently: ${state.stage}`;
-          }
+          // Current activity
+          if (state.stage === 'sync') parts.push('🔄 Syncing new jobs');
+          else if (state.stage === 'enrich') parts.push('⚙️ Enriching jobs');
+          else if (state.stage === 'match') parts.push('🎯 Computing matches');
           
-          statusEl.textContent = statusText;
+          statusEl.textContent = parts.join(' • ') || 'Pipeline running';
         }
       } catch (e) {
         console.error('Failed to load pipeline status:', e);
