@@ -348,7 +348,13 @@ async function pipelineDispatcher(env) {
         state.started_at = now;
         await env.DATA.put('pipeline_state', JSON.stringify(state));
         
-        const syncResult = await stageSync(env);
+        let syncResult = { new_jobs: 0 };
+        try {
+          syncResult = await stageSync(env);
+        } catch (e) {
+          console.error('Sync stage failed:', e.message);
+          state.errors = [...(state.errors || []).slice(-9), { stage: 'sync', error: e.message, at: now }];
+        }
         state.last_sync = now;
         result = { action: 'sync', ...syncResult };
         
@@ -397,11 +403,17 @@ async function pipelineDispatcher(env) {
       break;
       
     case 'sync':
-      const syncResult = await stageSync(env);
-      state.last_sync = now;
-      result = { action: 'sync', ...syncResult };
-      
-      // Always move to enrich after sync
+      try {
+        const syncResult = await stageSync(env);
+        state.last_sync = now;
+        result = { action: 'sync', ...syncResult };
+      } catch (e) {
+        console.error('Sync stage failed:', e.message);
+        state.errors = [...(state.errors || []).slice(-9), { stage: 'sync', error: e.message, at: now }];
+        state.last_sync = now; // Still mark as synced so we don't retry immediately
+        result = { action: 'sync_failed', error: e.message };
+      }
+      // Always move to enrich after sync (even on failure — process what we have)
       state.stage = 'enrich';
       state.cursor = 0;
       break;
@@ -460,17 +472,22 @@ async function stageSync(env) {
   const locationList = [...allUserLocations];
   if (locationList.length === 0) locationList.push('');
 
-  // Phase 1: User-specific queries (primary)
-  const userQueryList = [...allUserQueries].slice(0, 30);
+  // Phase 1: User-specific queries (primary) — limit to 10 to stay within time budget
+  const userQueryList = [...allUserQueries].slice(0, 10);
   
-  // Phase 2: Broad categories as safety net
+  // Phase 2: Rotate through broad categories (5 per run, not all 24)
+  const syncCountJson = await env.DATA.get('sync_rotation_counter') || '0';
+  const syncCount = parseInt(syncCountJson);
+  const broadSlice = BROAD_CATEGORIES.slice((syncCount * 5) % BROAD_CATEGORIES.length, ((syncCount * 5) % BROAD_CATEGORIES.length) + 5);
+  await env.DATA.put('sync_rotation_counter', String(syncCount + 1));
+  
   const cronFetchTasks = [];
   for (const query of userQueryList) {
     for (const loc of locationList) {
       cronFetchTasks.push({ query, loc, phase: 'user' });
     }
   }
-  for (const category of BROAD_CATEGORIES) {
+  for (const category of broadSlice) {
     for (const loc of locationList) {
       cronFetchTasks.push({ query: category, loc, phase: 'broad' });
     }
@@ -4153,18 +4170,23 @@ async function handleTriggerPipeline(url, env, cors) {
   const pin = url.searchParams.get('pin');
   if (pin !== '7714') return Response.json({ ok: false, error: 'Invalid PIN' }, { status: 403, headers: cors });
 
-  // Run in background via waitUntil so we return immediately
-  if (env._ctx && env._ctx.waitUntil) {
-    env._ctx.waitUntil(pipelineDispatcher(env).catch(e => console.error('Pipeline error:', e.message)));
+  // Force a specific stage transition if requested
+  const forceStage = url.searchParams.get('stage');
+  if (forceStage && ['idle', 'sync', 'enrich', 'match'].includes(forceStage)) {
     const state = JSON.parse(await env.DATA.get('pipeline_state') || '{}');
-    return Response.json({ ok: true, message: 'Pipeline triggered in background', current_stage: state.stage || 'idle' }, { headers: cors });
+    state.stage = forceStage;
+    state.cursor = 0;
+    await env.DATA.put('pipeline_state', JSON.stringify(state));
+    return Response.json({ ok: true, message: `Stage set to ${forceStage}. Next cron run will execute it.`, state }, { headers: cors });
   }
 
-  // Fallback: run inline
-  try {
-    const result = await pipelineDispatcher(env);
-    return Response.json({ ok: true, result }, { headers: cors });
-  } catch (e) {
-    return Response.json({ ok: false, error: e.message }, { status: 500, headers: cors });
+  // Pipeline runs via cron (15 min budget). HTTP trigger just sets state.
+  const state = JSON.parse(await env.DATA.get('pipeline_state') || '{}');
+  // Reset to idle so cron picks up work naturally
+  if (state.stage === 'sync' || !state.stage) {
+    state.stage = 'idle';
+    state.last_sync = null; // Force sync on next cron
+    await env.DATA.put('pipeline_state', JSON.stringify(state));
   }
+  return Response.json({ ok: true, message: 'Pipeline will run on next cron cycle (every 10 min)', current_stage: state.stage }, { headers: cors });
 }

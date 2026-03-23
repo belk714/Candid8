@@ -35432,10 +35432,16 @@ async function pipelineDispatcher(env) {
         state.run_id = uuid();
         state.started_at = now;
         await env.DATA.put("pipeline_state", JSON.stringify(state));
-        const syncResult2 = await stageSync(env);
+        let syncResult = { new_jobs: 0 };
+        try {
+          syncResult = await stageSync(env);
+        } catch (e2) {
+          console.error("Sync stage failed:", e2.message);
+          state.errors = [...(state.errors || []).slice(-9), { stage: "sync", error: e2.message, at: now }];
+        }
         state.last_sync = now;
-        result = { action: "sync", ...syncResult2 };
-        if (syncResult2.new_jobs > 0) {
+        result = { action: "sync", ...syncResult };
+        if (syncResult.new_jobs > 0) {
           state.stage = "enrich";
           state.cursor = 0;
         } else {
@@ -35474,9 +35480,16 @@ async function pipelineDispatcher(env) {
       }
       break;
     case "sync":
-      const syncResult = await stageSync(env);
-      state.last_sync = now;
-      result = { action: "sync", ...syncResult };
+      try {
+        const syncResult = await stageSync(env);
+        state.last_sync = now;
+        result = { action: "sync", ...syncResult };
+      } catch (e2) {
+        console.error("Sync stage failed:", e2.message);
+        state.errors = [...(state.errors || []).slice(-9), { stage: "sync", error: e2.message, at: now }];
+        state.last_sync = now;
+        result = { action: "sync_failed", error: e2.message };
+      }
       state.stage = "enrich";
       state.cursor = 0;
       break;
@@ -35518,14 +35531,18 @@ async function stageSync(env) {
   }
   const locationList = [...allUserLocations];
   if (locationList.length === 0) locationList.push("");
-  const userQueryList = [...allUserQueries].slice(0, 30);
+  const userQueryList = [...allUserQueries].slice(0, 10);
+  const syncCountJson = await env.DATA.get("sync_rotation_counter") || "0";
+  const syncCount = parseInt(syncCountJson);
+  const broadSlice = BROAD_CATEGORIES.slice(syncCount * 5 % BROAD_CATEGORIES.length, syncCount * 5 % BROAD_CATEGORIES.length + 5);
+  await env.DATA.put("sync_rotation_counter", String(syncCount + 1));
   const cronFetchTasks = [];
   for (const query of userQueryList) {
     for (const loc of locationList) {
       cronFetchTasks.push({ query, loc, phase: "user" });
     }
   }
-  for (const category of BROAD_CATEGORIES) {
+  for (const category of broadSlice) {
     for (const loc of locationList) {
       cronFetchTasks.push({ query: category, loc, phase: "broad" });
     }
@@ -38499,17 +38516,21 @@ async function handlePipelineStatus(url, env, cors) {
 async function handleTriggerPipeline(url, env, cors) {
   const pin = url.searchParams.get("pin");
   if (pin !== "7714") return Response.json({ ok: false, error: "Invalid PIN" }, { status: 403, headers: cors });
-  if (env._ctx && env._ctx.waitUntil) {
-    env._ctx.waitUntil(pipelineDispatcher(env).catch((e2) => console.error("Pipeline error:", e2.message)));
-    const state = JSON.parse(await env.DATA.get("pipeline_state") || "{}");
-    return Response.json({ ok: true, message: "Pipeline triggered in background", current_stage: state.stage || "idle" }, { headers: cors });
+  const forceStage = url.searchParams.get("stage");
+  if (forceStage && ["idle", "sync", "enrich", "match"].includes(forceStage)) {
+    const state2 = JSON.parse(await env.DATA.get("pipeline_state") || "{}");
+    state2.stage = forceStage;
+    state2.cursor = 0;
+    await env.DATA.put("pipeline_state", JSON.stringify(state2));
+    return Response.json({ ok: true, message: `Stage set to ${forceStage}. Next cron run will execute it.`, state: state2 }, { headers: cors });
   }
-  try {
-    const result = await pipelineDispatcher(env);
-    return Response.json({ ok: true, result }, { headers: cors });
-  } catch (e2) {
-    return Response.json({ ok: false, error: e2.message }, { status: 500, headers: cors });
+  const state = JSON.parse(await env.DATA.get("pipeline_state") || "{}");
+  if (state.stage === "sync" || !state.stage) {
+    state.stage = "idle";
+    state.last_sync = null;
+    await env.DATA.put("pipeline_state", JSON.stringify(state));
   }
+  return Response.json({ ok: true, message: "Pipeline will run on next cron cycle (every 10 min)", current_stage: state.stage }, { headers: cors });
 }
 export {
   index_default as default
