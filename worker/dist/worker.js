@@ -36088,7 +36088,20 @@ async function matchJobsAgainstAllUsers(env, newJobIds) {
       }
       await env.DATA.put(`user_alerts:${userId}`, JSON.stringify([...alertedJobIds]));
       if (newMatchIds.length) {
-        await env.DATA.put(`user_matches:${userId}`, JSON.stringify([...existingMatchIds, ...newMatchIds]));
+        const allMatchIds = [...existingMatchIds, ...newMatchIds];
+        await env.DATA.put(`user_matches:${userId}`, JSON.stringify(allMatchIds));
+        const existingIndex = JSON.parse(await env.DATA.get(`user_match_index:${userId}`) || "[]");
+        const seenJobIds = new Set(existingIndex.map((e2) => e2.job_id));
+        const newEntries = [];
+        for (const mid of newMatchIds) {
+          const m2 = JSON.parse(await env.DATA.get(`match:${mid}`) || "null");
+          if (m2 && !seenJobIds.has(m2.job_id)) {
+            newEntries.push({ id: mid, score: m2.composite_score ?? m2.score ?? 0, job_id: m2.job_id });
+            seenJobIds.add(m2.job_id);
+          }
+        }
+        const updatedIndex = [...existingIndex, ...newEntries].sort((a2, b2) => b2.score - a2.score);
+        await env.DATA.put(`user_match_index:${userId}`, JSON.stringify(updatedIndex));
       }
     } catch (e2) {
       console.error("Match-on-ingest failed for user", userId, e2.message);
@@ -36142,6 +36155,7 @@ async function route(url, request, env, cors) {
   if (path === "/api/admin/scrape-jobs" && method === "POST") return handleScrapeJobs(url, env, cors);
   if (path === "/api/admin/wipe-jobs" && method === "POST") return handleWipeJobs(url, env, cors);
   if (path === "/api/admin/purge-bad-matches" && method === "POST") return handlePurgeBadMatches(url, env, cors);
+  if (path === "/api/admin/rebuild-match-index" && method === "POST") return handleRebuildMatchIndex(url, env, cors);
   if (path === "/api/pipeline/status" && method === "GET") return handlePipelineStatus(url, env, cors);
   if (path === "/api/admin/trigger-pipeline" && method === "POST") return handleTriggerPipeline(url, env, cors);
   if (path === "/api/admin/dashboard" && method === "GET") return handleAdminDashboard(url, env, cors);
@@ -36843,23 +36857,27 @@ async function handleGetMatches(request, env, cors) {
   const url = new URL(request.url);
   const limit = parseInt(url.searchParams.get("limit") || "50");
   const offset = parseInt(url.searchParams.get("offset") || "0");
-  const matchesJson = await env.DATA.get(`user_matches:${userId}`) || "[]";
-  const allMatchIds = JSON.parse(matchesJson);
-  const dedupedMatchIds = [...new Set(allMatchIds)];
+  const indexJson = await env.DATA.get(`user_match_index:${userId}`);
   const settings = JSON.parse(await env.DATA.get(`user_settings:${userId}`) || "{}");
+  let sortedEntries;
+  if (indexJson) {
+    sortedEntries = JSON.parse(indexJson);
+  } else {
+    const matchesJson = await env.DATA.get(`user_matches:${userId}`) || "[]";
+    const allMatchIds = [...new Set(JSON.parse(matchesJson))];
+    sortedEntries = allMatchIds.map((id) => ({ id, score: 0, job_id: null }));
+  }
+  const filtered = sortedEntries.filter((e2) => e2.score >= 40 || e2.score === 0);
+  const totalCount = filtered.length;
+  const overFetchLimit = limit * 2;
+  const pageEntries = filtered.slice(offset, offset + overFetchLimit);
   const matches = [];
-  const seenJobIds = /* @__PURE__ */ new Set();
-  let cursor = offset;
-  const maxReads = Math.min(dedupedMatchIds.length, 80);
-  let reads = 0;
-  while (matches.length < limit && cursor < dedupedMatchIds.length && reads < maxReads) {
-    const id = dedupedMatchIds[cursor];
-    cursor++;
-    reads++;
-    const m2 = JSON.parse(await env.DATA.get(`match:${id}`) || "null");
+  let consumed = 0;
+  for (const entry of pageEntries) {
+    if (matches.length >= limit) break;
+    consumed++;
+    const m2 = JSON.parse(await env.DATA.get(`match:${entry.id}`) || "null");
     if (!m2) continue;
-    if (seenJobIds.has(m2.job_id)) continue;
-    seenJobIds.add(m2.job_id);
     const job = JSON.parse(await env.DATA.get(`job:${m2.job_id}`) || "null");
     if (!job) continue;
     if (settings.salary_min && job.salary_max && typeof job.salary_max === "number" && job.salary_max > 0 && job.salary_max < settings.salary_min) continue;
@@ -36868,8 +36886,6 @@ async function handleGetMatches(request, env, cors) {
       if (!jobMatchesLocationFilter(job, settings.locations, settings.radius || 50)) continue;
     }
     const breakdown = JSON.parse(m2.breakdown || "{}");
-    const displayScore = m2.composite_score ?? m2.score;
-    if (displayScore != null && displayScore < 40) continue;
     matches.push({
       id: m2.id,
       score: m2.score,
@@ -36886,15 +36902,15 @@ async function handleGetMatches(request, env, cors) {
       job: { id: job.id, title: job.title, company: job.company, location: job.location, salary_min: job.salary_min, salary_max: job.salary_max, url: job.url }
     });
   }
-  matches.sort((a2, b2) => (b2.composite_score ?? b2.score ?? -1) - (a2.composite_score ?? a2.score ?? -1));
+  const nextOffset = offset + consumed;
   return Response.json({
     ok: true,
     matches,
-    total_count: dedupedMatchIds.length,
-    cursor,
+    total_count: totalCount,
     limit,
     offset,
-    has_more: cursor < dedupedMatchIds.length
+    cursor: nextOffset,
+    has_more: nextOffset < totalCount
   }, { headers: cors });
 }
 async function handleGetMatchDetail(request, env, cors, jobId) {
@@ -38839,6 +38855,43 @@ async function handlePurgeBadMatches(url, env, cors) {
     users_affected: purgeReport.length,
     purge_report: purgeReport
   }, { headers: cors });
+}
+async function handleRebuildMatchIndex(url, env, cors) {
+  requirePin(url);
+  const targetUser = url.searchParams.get("user") || null;
+  const batchSize = parseInt(url.searchParams.get("batch") || "60");
+  const usersIndexJson = await env.DATA.get("users_index") || "[]";
+  const userIds = targetUser ? [targetUser] : JSON.parse(usersIndexJson);
+  const report = [];
+  for (const userId of userIds) {
+    const matchesJson = await env.DATA.get(`user_matches:${userId}`) || "[]";
+    const allMatchIds = [...new Set(JSON.parse(matchesJson))];
+    const existingIndex = JSON.parse(await env.DATA.get(`user_match_index:${userId}`) || "[]");
+    const indexedIds = new Set(existingIndex.map((e2) => e2.id));
+    const seenJobIds = new Set(existingIndex.map((e2) => e2.job_id));
+    const unindexed = allMatchIds.filter((id) => !indexedIds.has(id));
+    const batch = unindexed.slice(0, batchSize);
+    const newEntries = [];
+    for (const mid of batch) {
+      const m2 = JSON.parse(await env.DATA.get(`match:${mid}`) || "null");
+      if (!m2) continue;
+      if (seenJobIds.has(m2.job_id)) continue;
+      seenJobIds.add(m2.job_id);
+      newEntries.push({ id: mid, score: m2.composite_score ?? m2.score ?? 0, job_id: m2.job_id });
+    }
+    const updatedIndex = [...existingIndex, ...newEntries].sort((a2, b2) => b2.score - a2.score);
+    await env.DATA.put(`user_match_index:${userId}`, JSON.stringify(updatedIndex));
+    report.push({
+      user_id: userId,
+      total_matches: allMatchIds.length,
+      previously_indexed: existingIndex.length,
+      batch_processed: batch.length,
+      new_entries: newEntries.length,
+      index_size: updatedIndex.length,
+      remaining: unindexed.length - batch.length
+    });
+  }
+  return Response.json({ ok: true, report }, { headers: cors });
 }
 export {
   index_default as default

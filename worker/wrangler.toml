@@ -7,7 +7,7 @@ routes = [
 ]
 
 [triggers]
-crons = ["0 */6 * * *"]
+crons = ["*/10 * * * *"]
 
 [[kv_namespaces]]
 binding = "WAITLIST"
