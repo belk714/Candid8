@@ -35414,50 +35414,53 @@ async function pipelineDispatcher(env) {
   if (!state.stage) {
     state.stage = "idle";
     state.cursor = 0;
+    state.muse_cursor = 0;
+    state.muse_category_index = 0;
     state.run_id = uuid();
     state.started_at = now;
     state.errors = [];
   }
-  console.log(`Pipeline state: ${state.stage}, cursor: ${state.cursor}`);
+  console.log(`Pipeline state: ${state.stage}, cursor: ${state.cursor}, muse_cursor: ${state.muse_cursor || 0}`);
   let result = { action: "none", stage: state.stage };
   switch (state.stage) {
     case "idle":
     case void 0:
     case null:
       const lastSync = state.last_sync;
+      const lastMuseSync = state.last_muse_sync;
       if (!lastSync || lastSync < fiveHoursAgo) {
-        console.log("Starting sync stage");
-        state.stage = "sync";
+        console.log("Starting muse sync stage");
+        state.stage = "sync_muse";
         state.cursor = 0;
+        state.muse_cursor = 0;
         state.run_id = uuid();
         state.started_at = now;
         await env.DATA.put("pipeline_state", JSON.stringify(state));
         let syncResult = { new_jobs: 0 };
         try {
-          syncResult = await stageSync(env);
+          syncResult = await stageSyncMuse(env, state);
         } catch (e2) {
-          console.error("Sync stage failed:", e2.message);
-          state.errors = [...(state.errors || []).slice(-9), { stage: "sync", error: e2.message, at: now }];
+          console.error("Muse sync stage failed:", e2.message);
+          state.errors = [...(state.errors || []).slice(-9), { stage: "sync_muse", error: e2.message, at: now }];
         }
-        state.last_sync = now;
-        result = { action: "sync", ...syncResult };
-        if (syncResult.new_jobs > 0) {
-          state.stage = "enrich";
-          state.cursor = 0;
-        } else {
-          const needsEnrich = await countUnenrichedJobs(env);
-          if (needsEnrich > 0) {
-            state.stage = "enrich";
-            state.cursor = 0;
-          } else {
-            const needsMatch = await getEnrichedUnmatchedJobs(env);
-            if (needsMatch.length > 0) {
-              state.stage = "match";
-            } else {
-              state.stage = "idle";
-            }
-          }
+        state.last_muse_sync = now;
+        result = { action: "sync_muse", ...syncResult };
+        state.stage = "sync_adzuna";
+      } else if (!lastMuseSync || lastMuseSync < fiveHoursAgo) {
+        console.log("Starting muse sync stage (catch-up)");
+        state.stage = "sync_muse";
+        state.muse_cursor = state.muse_cursor || 0;
+        await env.DATA.put("pipeline_state", JSON.stringify(state));
+        let syncResult = { new_jobs: 0 };
+        try {
+          syncResult = await stageSyncMuse(env, state);
+        } catch (e2) {
+          console.error("Muse sync stage failed:", e2.message);
+          state.errors = [...(state.errors || []).slice(-9), { stage: "sync_muse", error: e2.message, at: now }];
         }
+        state.last_muse_sync = now;
+        result = { action: "sync_muse", ...syncResult };
+        state.stage = "sync_adzuna";
       } else {
         const needsEnrich = await countUnenrichedJobs(env);
         if (needsEnrich > 0) {
@@ -35478,6 +35481,31 @@ async function pipelineDispatcher(env) {
           }
         }
       }
+      break;
+    case "sync_muse":
+      try {
+        const syncResult = await stageSyncMuse(env, state);
+        state.last_muse_sync = now;
+        result = { action: "sync_muse", ...syncResult };
+      } catch (e2) {
+        console.error("Muse sync stage failed:", e2.message);
+        state.errors = [...(state.errors || []).slice(-9), { stage: "sync_muse", error: e2.message, at: now }];
+        result = { action: "sync_muse_failed", error: e2.message };
+      }
+      state.stage = "sync_adzuna";
+      break;
+    case "sync_adzuna":
+      try {
+        const syncResult = await stageSync(env);
+        state.last_sync = now;
+        result = { action: "sync_adzuna", ...syncResult };
+      } catch (e2) {
+        console.error("Adzuna sync stage failed:", e2.message);
+        state.errors = [...(state.errors || []).slice(-9), { stage: "sync_adzuna", error: e2.message, at: now }];
+        result = { action: "sync_adzuna_failed", error: e2.message };
+      }
+      state.stage = "enrich";
+      state.cursor = 0;
       break;
     case "sync":
       try {
@@ -35619,6 +35647,133 @@ async function stageSync(env) {
   console.log(`Stored ${newJobIds.length} new jobs`);
   return { new_jobs: newJobIds.length, total_jobs: jobsIndex.length };
 }
+async function stageSyncMuse(env, state) {
+  console.log("Running Muse sync stage...");
+  const museIdsJson = await env.DATA.get("muse_ids_index") || "{}";
+  const existingMuseIds = new Set(Object.keys(JSON.parse(museIdsJson)));
+  const allJobs = [];
+  const locations = ["Houston, TX", "Dallas, TX", "Austin, TX"];
+  const levels = ["Senior Level", "Management"];
+  const categories = ["Project Management", "Business Operations", "Data Science", "Education", "Software Engineering", "Marketing", "Finance"];
+  const categoryIndex = state.muse_category_index || 0;
+  const categoriesToProcess = categories.slice(categoryIndex, categoryIndex + 2);
+  const nextCategoryIndex = (categoryIndex + 2) % categories.length;
+  console.log(`Processing categories: ${categoriesToProcess.join(", ")} (index ${categoryIndex})`);
+  function stripHtml(html) {
+    if (!html) return "";
+    return html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#\d+;/g, "").replace(/\s+/g, " ").trim();
+  }
+  const fetchTasks = [];
+  for (const location of locations) {
+    for (const level of levels) {
+      fetchTasks.push({ location, level, category: null });
+      for (const category of categoriesToProcess) {
+        fetchTasks.push({ location, level, category });
+      }
+    }
+  }
+  console.log(`Fetching from ${fetchTasks.length} Muse API endpoints`);
+  let totalPages = 0;
+  for (const task of fetchTasks) {
+    for (let page = 1; page <= 5; page++) {
+      try {
+        const params = new URLSearchParams({
+          location: task.location,
+          level: task.level,
+          page: page.toString()
+        });
+        if (task.category) {
+          params.set("category", task.category);
+        }
+        const url = `https://www.themuse.com/api/public/jobs?${params}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.error(`Muse API error: ${response.status} ${response.statusText}`);
+          break;
+        }
+        const data = await response.json();
+        totalPages++;
+        if (!data.results || data.results.length === 0) {
+          break;
+        }
+        for (const job of data.results) {
+          const museId = String(job.id);
+          if (existingMuseIds.has(museId)) continue;
+          const title = job.name || "";
+          const company = job.company?.name || "";
+          const locations2 = (job.locations || []).map((l2) => l2.name).join(", ");
+          const levels2 = (job.levels || []).map((l2) => l2.name).join(", ");
+          const categories2 = (job.categories || []).map((c2) => c2.name).join(", ");
+          const url2 = job.refs?.landing_page || "";
+          const fullDescription = stripHtml(job.contents || "");
+          if (title && company && fullDescription.length > 100) {
+            allJobs.push({
+              muse_id: museId,
+              title,
+              company,
+              location: locations2,
+              seniority_level: levels2,
+              category: categories2,
+              description: fullDescription,
+              url: url2,
+              created: (/* @__PURE__ */ new Date()).toISOString()
+            });
+            existingMuseIds.add(museId);
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        if (data.results.length < 20) break;
+      } catch (e2) {
+        console.error(`Muse API fetch failed for ${task.location}/${task.level}:`, e2.message);
+        break;
+      }
+    }
+  }
+  console.log(`Found ${allJobs.length} new Muse jobs from ${totalPages} API pages`);
+  const jobsIndexJson = await env.DATA.get("jobs_index") || "[]";
+  let jobsIndex = JSON.parse(jobsIndexJson);
+  const newJobIds = [];
+  const museIdsIndex = JSON.parse(museIdsJson);
+  for (const j2 of allJobs) {
+    const id = uuid();
+    const job = {
+      id,
+      muse_id: j2.muse_id,
+      title: j2.title,
+      company: j2.company,
+      location: j2.location,
+      description: j2.description,
+      full_description: j2.description,
+      // Muse already provides full content
+      salary_min: null,
+      // Muse doesn't provide salary data
+      salary_max: null,
+      url: j2.url,
+      category: j2.category,
+      source: "themuse",
+      seniority_level: j2.seniority_level,
+      created_at: j2.created,
+      needs_enrichment: true,
+      // Still need GPT parsing and embedding
+      scrape_required: false,
+      // Skip scraping step - we already have full content
+      embedding: null,
+      structured_requirements: null
+    };
+    await env.DATA.put(`job:${id}`, JSON.stringify(job));
+    newJobIds.push(id);
+    museIdsIndex[j2.muse_id] = id;
+  }
+  if (newJobIds.length > 0) {
+    jobsIndex = [...jobsIndex, ...newJobIds];
+    await env.DATA.put("jobs_index", JSON.stringify(jobsIndex));
+    await env.DATA.put("muse_ids_index", JSON.stringify(museIdsIndex));
+  }
+  state.muse_category_index = nextCategoryIndex;
+  await env.DATA.put("pipeline_state", JSON.stringify(state));
+  console.log(`Stored ${newJobIds.length} new Muse jobs, next category index: ${nextCategoryIndex}`);
+  return { new_jobs: newJobIds.length, total_jobs: jobsIndex.length, source: "muse", pages_fetched: totalPages };
+}
 async function stageEnrich(env, cursor) {
   console.log(`Running enrich stage from cursor ${cursor}...`);
   const jobsIndexJson = await env.DATA.get("jobs_index") || "[]";
@@ -35644,36 +35799,47 @@ async function stageEnrich(env, cursor) {
   const enrichedUnmatched = JSON.parse(enrichedUnmatchedJson);
   for (const job of jobsToEnrich) {
     try {
-      console.log(`Enriching: ${job.title} at ${job.company}`);
+      console.log(`Enriching: ${job.title} at ${job.company} (source: ${job.source})`);
       let fullDescription = null;
       let lowConfidence = false;
       let scrapeFailed = false;
-      try {
-        if (job.url) {
-          fullDescription = await scrapeFullDescription(job.url);
-          if (fullDescription && fullDescription.length > 100) {
-            const lowerDesc = fullDescription.toLowerCase();
-            const isGeoBlock = lowerDesc.includes("befinden sie sich") || lowerDesc.includes("richtige land") || lowerDesc.includes("fortfahren");
-            const isAccessDenied = lowerDesc.includes("access denied") || lowerDesc.includes("suspicious behavior") || lowerDesc.includes("blocked") || lowerDesc.includes("not authorized");
-            if (isGeoBlock || isAccessDenied || fullDescription.length < 100) {
-              console.log(`Scrape failure detected for ${job.title}: geo-block=${isGeoBlock}, access-denied=${isAccessDenied}, short=${fullDescription.length < 100}`);
+      let descForParsing = "";
+      let enrichmentSource = "scraped";
+      if (job.source === "themuse") {
+        fullDescription = job.full_description || job.description || "";
+        descForParsing = fullDescription;
+        scrapeFailed = false;
+        lowConfidence = fullDescription.length < 100;
+        enrichmentSource = "api";
+        console.log(`Muse job: Using provided description (${fullDescription.length} chars)`);
+      } else {
+        try {
+          if (job.url && job.scrape_required !== false) {
+            fullDescription = await scrapeFullDescription(job.url);
+            if (fullDescription && fullDescription.length > 100) {
+              const lowerDesc = fullDescription.toLowerCase();
+              const isGeoBlock = lowerDesc.includes("befinden sie sich") || lowerDesc.includes("richtige land") || lowerDesc.includes("fortfahren");
+              const isAccessDenied = lowerDesc.includes("access denied") || lowerDesc.includes("suspicious behavior") || lowerDesc.includes("blocked") || lowerDesc.includes("not authorized");
+              if (isGeoBlock || isAccessDenied || fullDescription.length < 100) {
+                console.log(`Scrape failure detected for ${job.title}: geo-block=${isGeoBlock}, access-denied=${isAccessDenied}, short=${fullDescription.length < 100}`);
+                scrapeFailed = true;
+                fullDescription = null;
+              } else if (fullDescription.length > 200) {
+                job.full_description = fullDescription;
+              }
+            } else {
               scrapeFailed = true;
-              fullDescription = null;
-            } else if (fullDescription.length > 200) {
-              job.full_description = fullDescription;
             }
-          } else {
-            scrapeFailed = true;
           }
+        } catch (e2) {
+          console.error("Scrape failed:", job.title, e2.message);
+          lowConfidence = true;
+          scrapeFailed = true;
         }
-      } catch (e2) {
-        console.error("Scrape failed:", job.title, e2.message);
-        lowConfidence = true;
-        scrapeFailed = true;
-      }
-      const descForParsing = fullDescription && fullDescription.length > (job.description || "").length ? fullDescription : job.description || "";
-      if (!fullDescription && (!job.description || job.description.length < 100)) {
-        lowConfidence = true;
+        descForParsing = fullDescription && fullDescription.length > (job.description || "").length ? fullDescription : job.description || "";
+        if (!fullDescription && (!job.description || job.description.length < 100)) {
+          lowConfidence = true;
+        }
       }
       let sr2 = null;
       if (!scrapeFailed) {
@@ -35701,6 +35867,7 @@ async function stageEnrich(env, cursor) {
       job.needs_enrichment = false;
       job.low_confidence = lowConfidence;
       job.scrape_failed = scrapeFailed;
+      job.enrichment_source = enrichmentSource;
       if (sr2) job.structured_requirements = JSON.stringify(sr2);
       if (embedding) job.embedding = JSON.stringify(embedding);
       await env.DATA.put(`job:${job.id}`, JSON.stringify(job));
